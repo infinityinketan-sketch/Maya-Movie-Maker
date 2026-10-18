@@ -1,0 +1,39 @@
+name = "maya-api"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ANTHROPIC_MODEL = "claude-sonnet-5-5"
+GEMINI_IMAGE_MODEL = "gemini-nano-banana-2.1"
+USD_INR = "88"
+CREDIT_MARKUP = "3"
+DAILY_CREDIT_LIMIT = "20000"
+GOOGLE_PLAY_PACKAGE = "com.maya.moviemaker"
+# Set after deploy: your worker URL and the public URL of the R2 bucket
+PUBLIC_API_BASE = "https://maya-api.YOUR-SUBDOMAIN.workers.dev"
+MEDIA_PUBLIC_BASE = "https://media.YOUR-DOMAIN.com"
+
+# Secrets (set with `npx wrangler secret put NAME`, never commit them):
+# SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY,
+# FAL_KEY, GOOGLE_SERVICE_ACCOUNT_JSON
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "maya-media"
+
+[[queues.producers]]
+binding = "JOBS"
+queue = "maya-jobs"
+
+[[queues.consumers]]
+queue = "maya-jobs"
+max_batch_size = 5
+max_batch_timeout = 2
+max_retries = 0
+
+[triggers]
+crons = ["*/30 * * * *"]
+
+[observability]
+enabled = true
