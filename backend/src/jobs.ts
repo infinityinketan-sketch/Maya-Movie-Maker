@@ -35,6 +35,13 @@ export async function assertCanAfford(env: Env, d: Db, userId: string, credits: 
  * If the charge fails the job is removed and nothing is spent.
  */
 export async function startJob(env: Env, d: Db, j: NewJob): Promise<Job> {
+  const job = await chargeJob(env, d, j);
+  await env.JOBS.send({ type: 'start', jobId: job.id });
+  return job;
+}
+
+/** Same as startJob but for work done inside the request (no queue); the caller must succeed or fail it. */
+export async function chargeJob(env: Env, d: Db, j: NewJob, status: 'queued' | 'running' = 'queued'): Promise<Job> {
   await assertDailyLimit(env, d, j.userId, j.credits);
   const ins = await d
     .from('jobs')
@@ -48,6 +55,7 @@ export async function startJob(env: Env, d: Db, j: NewJob): Promise<Job> {
       provider: j.provider,
       model: j.model,
       input: j.input ?? {},
+      status,
     })
     .select('*')
     .single();
@@ -68,7 +76,6 @@ export async function startJob(env: Env, d: Db, j: NewJob): Promise<Job> {
     }
     throw new Error(charge.error.message);
   }
-  await env.JOBS.send({ type: 'start', jobId: job.id });
   return job;
 }
 

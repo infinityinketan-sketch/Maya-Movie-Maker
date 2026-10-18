@@ -90,4 +90,41 @@ export interface Catalog {
   renderPerMinute: number;
   tiers: Record<Tier, { label: string; videoPerShot: Record<'4' | '6' | '8', number> }>;
   packs: CreditPack[];
+  director: { direct: number; reviewByShots: Record<string, number> };
+}
+
+export type CameraGroupId = 'size' | 'angle' | 'movement' | 'lens' | 'light';
+export interface CameraOption {
+  id: string;
+  label: string;
+  prompt: string;
+  says: string;
+  useFor: string;
+}
+export interface CameraGroup {
+  id: CameraGroupId;
+  title: string;
+  options: CameraOption[];
+}
+
+export interface DirectorOption {
+  title: string;
+  camera: string;
+  action: string;
+  why: string;
+}
+
+export interface ReviewNote {
+  shot: number;
+  shotId: string;
+  issue: string;
+  suggestion: string;
+  camera?: string;
+  action?: string;
+}
+export interface FilmReview {
+  summary: string;
+  strengths: string[];
+  notes: ReviewNote[];
+  credits: number;
 }

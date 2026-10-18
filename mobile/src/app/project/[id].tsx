@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api } from '../../lib/api';
 import { framesNeeded, planCost, portraitsNeeded, videoCost, videosNeeded } from '../../lib/cost';
-import { useCatalog, useProject, useWallet } from '../../lib/hooks';
-import type { Catalog, Character, Project, Scene, Shot } from '../../lib/types';
+import { useCatalog, useDirectorAccess, useProject, useWallet } from '../../lib/hooks';
+import type { Catalog, Character, FilmReview, Project, ReviewNote, Scene, Shot } from '../../lib/types';
+import { DirectorLocked, ReviewView } from '../../ui/director';
 import { Button, Card, Chip, confirmSpend, Empty, Field, Screen, SectionLabel, showError, StatusPill } from '../../ui/kit';
 import { aspectOf, Player, saveVideoToPhone, shareVideo } from '../../ui/media';
 import { colors, radius, space, type } from '../../ui/theme';
@@ -169,6 +170,8 @@ function StoryStep({ project, scenes, shots, cat, balance }: Ctx) {
       ))}
 
       <Text style={[type.small, { marginTop: space(3) }]}>Tap any shot to change what happens, the camera or the dialogue — editing is free.</Text>
+
+      <DirectorReview project={project} shots={shots} cat={cat} balance={balance} />
       <Button
         title="Rewrite the whole story"
         kind="secondary"
@@ -179,6 +182,80 @@ function StoryStep({ project, scenes, shots, cat, balance }: Ctx) {
           run('plan', { action: 'Rewrite the story', credits: cost, balance, detail: 'This replaces all scenes, shots and characters, including frames and videos already made.' }, () => api.plan(project.id))
         }
       />
+    </View>
+  );
+}
+
+function DirectorReview({ project, shots, cat, balance }: Pick<Ctx, 'project' | 'shots' | 'cat' | 'balance'>) {
+  const access = useDirectorAccess();
+  const [review, setReview] = useState<FilmReview | null>(null);
+  const [applied, setApplied] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState<number | 'all' | 'run' | null>(null);
+  const cost = cat.director.reviewByShots[String(Math.min(40, Math.max(1, shots.length)))] ?? 0;
+
+  if (access === null) return null;
+  if (!access) {
+    return (
+      <View style={{ marginTop: space(3) }}>
+        <DirectorLocked />
+      </View>
+    );
+  }
+
+  async function runReview() {
+    if (!(await confirmSpend({ action: "Director's review", credits: cost, balance, detail: 'A director checks every shot for variety, angles, pacing and anything AI video will struggle with.' }))) return;
+    setBusy('run');
+    try {
+      setReview(await api.review(project.id));
+      setApplied(new Set());
+    } catch (e) {
+      showError(e);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function applyNote(n: ReviewNote, i: number) {
+    await api.updateShot(n.shotId, { ...(n.camera ? { camera: n.camera } : {}), ...(n.action ? { action: n.action } : {}) });
+    setApplied((prev) => new Set(prev).add(i));
+  }
+
+  return (
+    <View style={{ marginTop: space(3) }}>
+      {!review ? (
+        <Card>
+          <Text style={[type.label, { color: colors.accent }]}>Director tools</Text>
+          <Text style={[type.heading, { marginTop: 6 }]}>Get a director&apos;s notes before you shoot</Text>
+          <Text style={[type.small, { marginTop: 6 }]}>Checks opening and ending shots, shot variety, camera angles, dialogue coverage and pacing, with fixes you can apply in one tap.</Text>
+          <Button title="Director's review" cost={cost} loading={busy === 'run'} style={{ marginTop: space(1.5) }} onPress={runReview} />
+        </Card>
+      ) : (
+        <ReviewView
+          review={review}
+          applied={applied}
+          busy={busy === 'run' ? null : busy}
+          onApply={async (n, i) => {
+            setBusy(i);
+            try {
+              await applyNote(n, i);
+            } catch (e) {
+              showError(e);
+            } finally {
+              setBusy(null);
+            }
+          }}
+          onApplyAll={async () => {
+            setBusy('all');
+            try {
+              for (const [i, n] of review.notes.entries()) if ((n.camera || n.action) && !applied.has(i)) await applyNote(n, i);
+            } catch (e) {
+              showError(e);
+            } finally {
+              setBusy(null);
+            }
+          }}
+        />
+      )}
     </View>
   );
 }

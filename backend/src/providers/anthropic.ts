@@ -96,7 +96,23 @@ export function planPrompt(p: PlanInput): string {
   ].join('\n');
 }
 
-export async function planFilm(env: Env, input: PlanInput): Promise<{ plan: FilmPlan; costUsd: number }> {
+/** The film-craft rules shared by the story planner and the AI Director. */
+export const DIRECTOR_RULES = `Film-craft rules you always follow:
+- Open a scene with an establishing wide shot so the viewer knows where they are, then move closer as emotion rises.
+- Vary shot sizes: never cut between two shots of the same size and angle; alternate wide, medium and close.
+- Close-ups for feeling and decisions, wides for place and scale, inserts (hands, objects) for detail and rhythm.
+- Angle carries meaning: low angle = power or menace, high angle = weakness or loneliness, eye level = honest and neutral, Dutch tilt = unease, overhead = fate or pattern.
+- Keep screen direction: respect the 180-degree line in conversations; a character moving right keeps moving right across cuts.
+- Over-the-shoulder and matching close-ups for dialogue; give each speaker their own shot.
+- Every camera move must be motivated by the story (follow action, reveal, build tension). Static frames are allowed and often stronger.
+- Light sets the mood: golden hour = warmth and hope, blue hour = melancholy, hard side light = drama, neon = night city energy, soft window light = intimacy.
+- Lens choice: 24mm wide for space and energy, 35-50mm natural, 85mm portrait for faces with soft background, macro for tiny details.
+- AI video limits: each shot is a separate 4-8 second clip made from one still frame, so use ONE clear camera movement per shot, simple actions, no hard cuts inside a shot, no on-screen text, and describe the exact frame (who, where, light) at the start.`;
+
+export async function callClaudeTool<T>(
+  env: Env,
+  opts: { system: string; prompt: string; tool: { name: string; description: string; input_schema: unknown }; maxTokens: number },
+): Promise<{ input: T; costUsd: number }> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -106,12 +122,11 @@ export async function planFilm(env: Env, input: PlanInput): Promise<{ plan: Film
     },
     body: JSON.stringify({
       model: env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
-      max_tokens: planMaxTokens(input.targetSec),
-      system:
-        'You are a film director and screenwriter who plans short films for AI video generation. You think in shots, keep stories simple, visual and emotionally clear, and always answer by calling the submit_film_plan tool.',
-      tools: [PLAN_TOOL],
-      tool_choice: { type: 'tool', name: PLAN_TOOL.name },
-      messages: [{ role: 'user', content: planPrompt(input) }],
+      max_tokens: opts.maxTokens,
+      system: opts.system,
+      tools: [opts.tool],
+      tool_choice: { type: 'tool', name: opts.tool.name },
+      messages: [{ role: 'user', content: opts.prompt }],
     }),
   });
   const body = (await res.json()) as {
@@ -122,10 +137,20 @@ export async function planFilm(env: Env, input: PlanInput): Promise<{ plan: Film
   };
   if (!res.ok) throw new Error(`Claude error ${res.status}: ${body.error?.message ?? 'unknown'}`);
   const tool = body.content?.find((c) => c.type === 'tool_use');
-  if (!tool?.input) throw new Error(`Claude returned no plan (stop_reason ${body.stop_reason})`);
+  if (!tool?.input) throw new Error(`Claude returned no answer (stop_reason ${body.stop_reason})`);
   const usage = body.usage ?? { input_tokens: 0, output_tokens: 0 };
   const costUsd = (usage.input_tokens * UNIT_USD.llmInputPerMTok + usage.output_tokens * UNIT_USD.llmOutputPerMTok) / 1e6;
-  return { plan: normalizePlan(tool.input as FilmPlan), costUsd };
+  return { input: tool.input as T, costUsd };
+}
+
+export async function planFilm(env: Env, input: PlanInput): Promise<{ plan: FilmPlan; costUsd: number }> {
+  const { input: raw, costUsd } = await callClaudeTool<FilmPlan>(env, {
+    system: `You are a film director and screenwriter who plans short films for AI video generation. You think in shots, keep stories simple, visual and emotionally clear, and always answer by calling the submit_film_plan tool.\n\n${DIRECTOR_RULES}`,
+    prompt: planPrompt(input),
+    tool: PLAN_TOOL,
+    maxTokens: planMaxTokens(input.targetSec),
+  });
+  return { plan: normalizePlan(raw), costUsd };
 }
 
 /** Defensive clean-up so a slightly-off answer still produces valid rows. */

@@ -13,6 +13,18 @@ Type an idea, get a finished short film. Maya writes the story, designs the char
 | Music | One instrumental score, looped under the film | Lyria 2 via fal.ai | 27 |
 | Final cut | Shots joined in order with the score | fal.ai FFmpeg compose | 4 per minute |
 
+### Director tools (paid members)
+
+Unlocked automatically by the first credit-pack purchase.
+
+| Tool | What it does | Credits |
+|---|---|---|
+| Camera library | 42 shot sizes, angles, moves, lenses and lighting set-ups, each explained ("low angle = power or menace") and turned into the right words for the video model | free |
+| Ask the Director | Three ways to shoot one shot, matched to the shots before and after, with why each works; one tap applies it | 7 |
+| Director's review | Notes on the whole shot list (establishing shots, variety, angles, 180° rule, dialogue coverage, pacing, AI-video pitfalls), applied per note or all at once | 6–24 by shot count (16 for 10 shots) |
+
+The same film-craft rules also guide the story writer for every user, so first drafts already plan varied, motivated shots.
+
 1 credit sells for ₹1. Every action costs **API price × 3** in credits (rounded up), so even a user who spends every credit through Google Play (18% GST + 15% Play fee) leaves a profit. Failed jobs refund automatically. See `backend/src/pricing.ts` and the tests in `backend/test/pricing.test.ts`.
 
 ## Repository

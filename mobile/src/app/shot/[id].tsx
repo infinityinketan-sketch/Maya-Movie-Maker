@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { api } from '../../lib/api';
 import { videoCost } from '../../lib/cost';
-import { useCatalog, useProject, useWallet } from '../../lib/hooks';
+import { useCatalog, useDirectorAccess, useProject, useWallet } from '../../lib/hooks';
 import { supabase } from '../../lib/supabase';
-import type { Shot } from '../../lib/types';
+import type { DirectorOption, Shot } from '../../lib/types';
+import { CameraPicker, DirectorLocked, DirectorOptions } from '../../ui/director';
 import { Button, Card, Chip, confirmSpend, Field, Screen, SectionLabel, showError, StatusPill } from '../../ui/kit';
 import { aspectOf, Player } from '../../ui/media';
 import { colors, radius, space, type } from '../../ui/theme';
@@ -26,6 +27,7 @@ export default function ShotScreen() {
   const shot = shots.find((s) => s.id === id);
   const cat = useCatalog();
   const { balance } = useWallet();
+  const director = useDirectorAccess();
 
   if (!project || !shot || !cat) {
     return (
@@ -34,7 +36,19 @@ export default function ShotScreen() {
       </View>
     );
   }
-  return <ShotEditor key={shot.id} shot={shot} ratio={project.aspect_ratio} tierCost={videoCost(cat, project, shot)} imageCost={cat.image} balance={balance} speakers={characters.map((c) => c.name)} />;
+  return (
+    <ShotEditor
+      key={shot.id}
+      shot={shot}
+      ratio={project.aspect_ratio}
+      tierCost={videoCost(cat, project, shot)}
+      imageCost={cat.image}
+      directCost={cat.director.direct}
+      director={director}
+      balance={balance}
+      speakers={characters.map((c) => c.name)}
+    />
+  );
 }
 
 function ShotEditor({
@@ -42,6 +56,8 @@ function ShotEditor({
   ratio,
   tierCost,
   imageCost,
+  directCost,
+  director,
   balance,
   speakers,
 }: {
@@ -49,6 +65,8 @@ function ShotEditor({
   ratio: '16:9' | '9:16';
   tierCost: number;
   imageCost: number;
+  directCost: number;
+  director: boolean | null;
   balance: number | null;
   speakers: string[];
 }) {
@@ -58,6 +76,9 @@ function ShotEditor({
   const [speaker, setSpeaker] = useState(shot.speaker ?? '');
   const [duration, setDuration] = useState(shot.duration_sec);
   const [busy, setBusy] = useState<string | null>(null);
+  const [options, setOptions] = useState<DirectorOption[] | null>(null);
+  const [using, setUsing] = useState<number | null>(null);
+  const [pickerKey, setPickerKey] = useState(0);
   const dirty =
     action !== shot.action || camera !== (shot.camera ?? '') || dialogue !== (shot.dialogue ?? '') || speaker !== (shot.speaker ?? '') || duration !== shot.duration_sec;
   const drawing = shot.keyframe_status === 'queued' || shot.keyframe_status === 'running';
@@ -132,7 +153,7 @@ function ShotEditor({
 
       <SectionLabel>What happens</SectionLabel>
       <Field label="Action" value={action} onChangeText={setAction} multiline hint="Describe the frame: place, light, who is there, what moves." />
-      <Field label="Camera" value={camera} onChangeText={setCamera} placeholder="slow push-in, close-up" />
+      <Field label="Camera" value={camera} onChangeText={setCamera} placeholder="slow push-in, close-up" hint={director ? 'Type it, or build it with the Director tools below.' : undefined} />
       <Field label="Dialogue" value={dialogue} onChangeText={setDialogue} multiline placeholder="Leave empty for a silent shot" hint="About 2–3 words per second fits the shot." />
       {speakers.length > 0 && (
         <>
@@ -151,6 +172,51 @@ function ShotEditor({
           <Chip key={d} label={`${d} sec`} selected={duration === d} onPress={() => setDuration(d)} />
         ))}
       </View>
+      <SectionLabel>Director</SectionLabel>
+      {director === false ? <DirectorLocked /> : null}
+      {director ? (
+        <View>
+          <Text style={[type.small, { marginBottom: space(1.5) }]}>Tap a shot size, angle, move, lens and light. Each choice tells you what it makes the audience feel.</Text>
+          <CameraPicker key={pickerKey} camera={camera} onChange={setCamera} />
+          <Button
+            title="Ask the Director"
+            kind="secondary"
+            cost={directCost}
+            loading={busy === 'ask'}
+            style={{ marginTop: space(1) }}
+            onPress={() =>
+              go('ask', { action: 'Ask the Director', credits: directCost }, async () => {
+                const res = await api.direct(shot.id);
+                setOptions(res.options);
+              })
+            }
+          />
+          {options ? (
+            <View style={{ marginTop: space(2) }}>
+              <Text style={[type.small, { marginBottom: space(1) }]}>Three ways to shoot this. Using one replaces the camera and action, and unapproves the frame so you can redraw it.</Text>
+              <DirectorOptions
+                options={options}
+                busyIndex={using}
+                onUse={async (o, i) => {
+                  setUsing(i);
+                  try {
+                    await api.updateShot(shot.id, { camera: o.camera, action: o.action });
+                    setCamera(o.camera);
+                    setAction(o.action);
+                    setPickerKey((k) => k + 1);
+                    setOptions(null);
+                  } catch (e) {
+                    showError(e);
+                  } finally {
+                    setUsing(null);
+                  }
+                }}
+              />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
       {dirty ? (
         <Button
           title="Save changes"

@@ -26,7 +26,7 @@ export type JobMessage =
   | { type: 'start'; jobId: string }
   | { type: 'finalize'; jobId: string; ok: boolean; result?: unknown; error?: string };
 
-export type JobKind = 'plan' | 'portrait' | 'keyframe' | 'video' | 'music' | 'render';
+export type JobKind = 'plan' | 'portrait' | 'keyframe' | 'video' | 'music' | 'render' | 'director';
 
 export interface AppUser {
   id: string;

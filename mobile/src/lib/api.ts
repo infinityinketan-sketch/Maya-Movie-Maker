@@ -1,6 +1,6 @@
 import { config } from './config';
 import { supabase } from './supabase';
-import type { Catalog, Character, Project, Shot, Tier } from './types';
+import type { CameraGroup, Catalog, Character, DirectorOption, FilmReview, Project, Shot, Tier } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -35,7 +35,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const api = {
   catalog: () => call<Catalog>('GET', '/v1/catalog'),
-  me: () => call<{ balance: number }>('GET', '/v1/me'),
+  me: () => call<{ balance: number; director: boolean }>('GET', '/v1/me'),
   deleteAccount: () => call<{ ok: true }>('DELETE', '/v1/me'),
 
   createProject: (input: {
@@ -67,6 +67,10 @@ export const api = {
   video: (shotId: string) => call('POST', `/v1/shots/${shotId}/video`),
   music: (projectId: string) => call('POST', `/v1/projects/${projectId}/music`),
   render: (projectId: string) => call('POST', `/v1/projects/${projectId}/render`),
+
+  cameraLibrary: () => call<{ groups: CameraGroup[] }>('GET', '/v1/director/library'),
+  direct: (shotId: string) => call<{ options: DirectorOption[]; credits: number }>('POST', `/v1/shots/${shotId}/direct`),
+  review: (projectId: string) => call<FilmReview>('POST', `/v1/projects/${projectId}/review`),
 
   verifyPlayPurchase: (productId: string, purchaseToken: string) =>
     call<{ ok: true; balance: number; credits: number }>('POST', '/v1/billing/google-play/verify', { productId, purchaseToken }),

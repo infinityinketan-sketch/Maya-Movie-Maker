@@ -1,7 +1,8 @@
 import { Hono, type Context } from 'hono';
 import { balanceOf, db, getOwnedCharacter, getOwnedProject, getOwnedShot, must, type Shot } from './db';
 import { HttpError, type AppUser, type Env, type JobMessage } from './env';
-import { assertCanAfford, startJob } from './jobs';
+import { CAMERA_LIBRARY, directCostUsd, directorPrices, directShot, reviewCostUsd, reviewFilm, type ShotContext } from './director';
+import { assertCanAfford, chargeJob, failJob, startJob, succeedJob } from './jobs';
 import { verifyFalWebhook, type FalWebhook } from './providers/fal';
 import { getProductPurchase } from './providers/googleplay';
 import {
@@ -38,7 +39,12 @@ app.get('/health', (c) => c.json({ ok: true }));
 
 // ---------------------------------------------------------------- public
 
-app.get('/v1/catalog', (c) => c.json(catalog(priceConfig(c.env))));
+app.get('/v1/catalog', (c) => {
+  const cfg = priceConfig(c.env);
+  return c.json({ ...catalog(cfg), director: directorPrices((usd) => creditsFor(usd, cfg)) });
+});
+
+app.get('/v1/director/library', (c) => c.json({ groups: CAMERA_LIBRARY }));
 
 app.post('/v1/webhooks/fal', async (c) => {
   const raw = await c.req.arrayBuffer();
@@ -62,7 +68,7 @@ app.post('/v1/webhooks/fal', async (c) => {
 
 app.use('/v1/*', async (c, next) => {
   const path = c.req.path;
-  if (path === '/v1/catalog' || path.startsWith('/v1/webhooks/')) return next();
+  if (path === '/v1/catalog' || path === '/v1/director/library' || path.startsWith('/v1/webhooks/')) return next();
   const token = c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
   if (!token) throw new HttpError(401, 'unauthorized', 'Please sign in.');
   const res = await db(c.env).auth.getUser(token);
@@ -99,7 +105,8 @@ function clean(o: Record<string, unknown>) {
 
 app.get('/v1/me', async (c) => {
   const user = c.get('user');
-  return c.json({ user, balance: await balanceOf(db(c.env), user.id) });
+  const d = db(c.env);
+  return c.json({ user, balance: await balanceOf(d, user.id), director: await hasDirector(d, user.id) });
 });
 
 /** Play Store policy: users must be able to delete their account and data in the app. */
@@ -380,6 +387,100 @@ app.post('/v1/projects/:id/render', async (c) => {
   });
   await d.from('projects').update({ render_status: 'queued', status: 'rendering' }).eq('id', p.id);
   return c.json({ job }, 202);
+});
+
+// ---------------------------------------------------------------- AI Director (paying users)
+
+async function hasDirector(d: ReturnType<typeof db>, userId: string): Promise<boolean> {
+  const res = await d.from('profiles').select('director_access').eq('id', userId).maybeSingle();
+  return Boolean(res.data?.director_access);
+}
+
+async function requireDirector(d: ReturnType<typeof db>, userId: string): Promise<void> {
+  if (!(await hasDirector(d, userId))) {
+    throw new HttpError(403, 'director_locked', 'The Director is unlocked with your first credit pack.');
+  }
+}
+
+type FilmInfo = ShotContext['film'];
+function filmInfo(p: Awaited<ReturnType<typeof getOwnedProject>>): FilmInfo {
+  return { title: p.title, genre: p.genre, style: p.style, language: p.language, aspectRatio: p.aspect_ratio, logline: p.logline };
+}
+function shotInfo(s: Shot): ShotContext['shot'] {
+  return { idx: s.idx, durationSec: s.duration_sec, camera: s.camera, action: s.action, dialogue: s.dialogue, speaker: s.speaker };
+}
+
+/** Three ways to shoot one shot. Charged up front, refunded if the Director fails. */
+app.post('/v1/shots/:id/direct', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  await requireDirector(d, user.id);
+  const shot = await getOwnedShot(d, user.id, c.req.param('id'));
+  const p = await getOwnedProject(d, user.id, shot.project_id);
+  const [scene, shots, chars] = await Promise.all([
+    d.from('scenes').select('heading,summary').eq('id', shot.scene_id).maybeSingle(),
+    d.from('shots').select('idx,camera,action').eq('project_id', p.id).in('idx', [shot.idx - 1, shot.idx + 1]),
+    d.from('characters').select('name,description').eq('project_id', p.id),
+  ]);
+  const near = (shots.data ?? []) as { idx: number; camera: string | null; action: string }[];
+  const ctx: ShotContext = {
+    film: filmInfo(p),
+    scene: { heading: scene.data?.heading ?? 'SCENE', summary: scene.data?.summary ?? null },
+    characters: (chars.data ?? []) as { name: string; description: string }[],
+    previous: near.find((x) => x.idx === shot.idx - 1) ?? null,
+    next: near.find((x) => x.idx === shot.idx + 1) ?? null,
+    shot: shotInfo(shot),
+  };
+  const cost = directCostUsd();
+  const job = await chargeJob(
+    c.env,
+    d,
+    { userId: user.id, projectId: p.id, targetId: shot.id, kind: 'director', credits: creditsFor(cost, priceConfig(c.env)), costUsd: cost, provider: 'anthropic', model: c.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5', input: { action: 'direct' } },
+    'running',
+  );
+  try {
+    const { options, costUsd } = await directShot(c.env, ctx);
+    await succeedJob(d, job.id, { options }, costUsd);
+    return c.json({ options, credits: job.credits });
+  } catch (e) {
+    await failJob(d, job.id, e instanceof Error ? e.message : String(e));
+    throw new HttpError(502, 'director_failed', 'The Director could not answer just now. Your credits were returned.');
+  }
+});
+
+/** Director's review of the whole shot list. */
+app.post('/v1/projects/:id/review', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  await requireDirector(d, user.id);
+  const p = await getOwnedProject(d, user.id, c.req.param('id'));
+  const [scenesRes, shotsRes] = await Promise.all([
+    d.from('scenes').select('id,heading,idx').eq('project_id', p.id).order('idx'),
+    d.from('shots').select('*').eq('project_id', p.id).order('idx'),
+  ]);
+  const shots = (shotsRes.data ?? []) as Shot[];
+  if (!shots.length) throw new HttpError(400, 'no_shots', 'Write the story first.');
+  const scenes = ((scenesRes.data ?? []) as { id: string; heading: string }[]).map((sc) => ({
+    heading: sc.heading,
+    shots: shots.filter((s) => s.scene_id === sc.id).map(shotInfo),
+  }));
+  const cost = reviewCostUsd(shots.length);
+  const job = await chargeJob(
+    c.env,
+    d,
+    { userId: user.id, projectId: p.id, targetId: p.id, kind: 'director', credits: creditsFor(cost, priceConfig(c.env)), costUsd: cost, provider: 'anthropic', model: c.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5', input: { action: 'review' } },
+    'running',
+  );
+  try {
+    const { review, costUsd } = await reviewFilm(c.env, filmInfo(p), scenes);
+    // Point each note at the real shot id so the app can apply it.
+    const notes = review.notes.map((n) => ({ ...n, shotId: shots.find((s) => s.idx === n.shot - 1)?.id ?? null })).filter((n) => n.shotId);
+    await succeedJob(d, job.id, { review }, costUsd);
+    return c.json({ ...review, notes, credits: job.credits });
+  } catch (e) {
+    await failJob(d, job.id, e instanceof Error ? e.message : String(e));
+    throw new HttpError(502, 'director_failed', 'The Director could not answer just now. Your credits were returned.');
+  }
 });
 
 // ---------------------------------------------------------------- billing

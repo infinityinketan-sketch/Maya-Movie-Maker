@@ -2,7 +2,7 @@ import type { Session } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { supabase } from './supabase';
-import type { Catalog, Character, LedgerRow, Project, Scene, Shot } from './types';
+import type { CameraGroup, Catalog, Character, LedgerRow, Project, Scene, Shot } from './types';
 
 // ---------------------------------------------------------------- session
 
@@ -157,4 +157,45 @@ export function useProject(id: string | undefined) {
     Boolean(id),
   );
   return { ...data, loading, reload: load };
+}
+
+// ---------------------------------------------------------------- Director (paying users)
+
+/** True once the user has bought any credit pack. Re-checked whenever the wallet changes. */
+export function useDirectorAccess() {
+  const { session } = useSession();
+  const userId = session?.user.id;
+  const [access, setAccess] = useState<boolean | null>(null);
+  const load = useCallback(() => {
+    if (!userId) return Promise.resolve();
+    return Promise.resolve(
+      supabase
+        .from('profiles')
+        .select('director_access')
+        .eq('id', userId)
+        .maybeSingle()
+        .then((r) => setAccess(Boolean(r.data?.director_access))),
+    );
+  }, [userId]);
+  useEffect(() => {
+    load().catch(() => undefined);
+  }, [load]);
+  useRealtime('director-wallet', [{ table: 'wallets', filter: `user_id=eq.${userId}` }], load, Boolean(userId));
+  return access;
+}
+
+let libraryCache: CameraGroup[] | null = null;
+export function useCameraLibrary() {
+  const [groups, setGroups] = useState<CameraGroup[] | null>(libraryCache);
+  useEffect(() => {
+    if (libraryCache) return;
+    api
+      .cameraLibrary()
+      .then((r) => {
+        libraryCache = r.groups;
+        setGroups(r.groups);
+      })
+      .catch(() => undefined);
+  }, []);
+  return groups;
 }

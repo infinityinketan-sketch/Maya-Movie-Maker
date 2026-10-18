@@ -96,5 +96,28 @@ begin
 end $$;
 reset role;
 
+-- Director access: off by default, on after the first credited purchase, not editable by users
+do $$
+declare a uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  assert not (select director_access from public.profiles where id = a), 'director must start locked';
+  insert into public.purchases (user_id, provider, product_id, purchase_token, credits)
+  values (a, 'google_play', 'maya_credits_100', 'tok-director', 100);
+  assert (select director_access from public.profiles where id = a), 'purchase must unlock director';
+end $$;
+
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+do $$
+declare denied boolean := false;
+begin
+  begin
+    update public.profiles set director_access = true;
+  exception when insufficient_privilege then denied := true;
+  end;
+  assert denied, 'users must not be able to unlock director themselves';
+end $$;
+reset role;
+
 rollback;
 \echo 'ALL CREDIT TESTS PASSED'
