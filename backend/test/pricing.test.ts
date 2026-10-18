@@ -57,3 +57,13 @@ describe('credit pricing', () => {
     expect([1, 4, 5, 6, 7, 8, 12].map(snapDuration)).toEqual([4, 4, 4, 6, 6, 8, 8]);
   });
 });
+
+describe('render pricing', () => {
+  it('bills per started minute and matches the catalog price', async () => {
+    const { renderCredits } = await import('../src/pricing');
+    const perMinute = catalog(cfg).renderPerMinute;
+    expect(renderCredits(30, cfg)).toBe(perMinute);
+    expect(renderCredits(60, cfg)).toBe(perMinute);
+    expect(renderCredits(61, cfg)).toBe(perMinute * 2);
+  });
+});

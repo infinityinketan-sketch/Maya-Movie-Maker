@@ -74,6 +74,11 @@ export function renderCostUsd(seconds: number): number {
   return UNIT_USD.renderPerSec * seconds;
 }
 
+/** Render is billed per started minute so the app can show the exact price from the catalog. */
+export function renderCredits(seconds: number, cfg: PriceConfig): number {
+  return creditsFor(renderCostUsd(60), cfg) * Math.max(1, Math.ceil(seconds / 60));
+}
+
 export function snapDuration(sec: number): 4 | 6 | 8 {
   if (sec <= 5) return 4;
   if (sec <= 7) return 6;

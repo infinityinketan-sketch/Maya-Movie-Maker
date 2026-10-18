@@ -1,0 +1,7 @@
+# Copy to backend/.dev.vars for `npm run dev`. Never commit the real file.
+SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=
+ANTHROPIC_API_KEY=
+GEMINI_API_KEY=
+FAL_KEY=
+GOOGLE_SERVICE_ACCOUNT_JSON=

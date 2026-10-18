@@ -1,0 +1,72 @@
+{
+  "expo": {
+    "name": "Maya Movie Maker",
+    "slug": "maya-movie-maker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "maya",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "bundleIdentifier": "com.maya.moviemaker",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.maya.moviemaker",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#0D0A12",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_AUDIO"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0D0A12",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 76
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Allow Maya to save your finished films to your gallery.",
+          "granularPermissions": [
+            "video"
+          ]
+        }
+      ],
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": false,
+          "supportsPictureInPicture": false
+        }
+      ],
+      [
+        "expo-iap",
+        {
+          "android": {
+            "store": "play"
+          }
+        }
+      ],
+      "expo-sharing"
+    ],
+    "experiments": {
+      "typedRoutes": false,
+      "reactCompiler": true
+    },
+    "backgroundColor": "#0D0A12"
+  }
+}

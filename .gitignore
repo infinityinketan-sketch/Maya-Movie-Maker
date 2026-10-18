@@ -3,6 +3,7 @@ node_modules/
 .dev.vars
 .env
 .env.*
+!.dev.vars.example
 !.env.example
 dist/
 .expo/
