@@ -6,6 +6,7 @@ import { failJob, succeedJob } from './jobs';
 import { planFilm } from './providers/anthropic';
 import { falSubmit, resultUrl } from './providers/fal';
 import { generateImage, type InlineImage } from './providers/gemini';
+import { posterPrompt } from './ads';
 import { MUSIC_MODEL, RENDER_MODEL, VIDEO_MODELS } from './pricing';
 import { copyFromUrl, fromBase64, mediaKey, putBytes, readAsBase64 } from './storage';
 
@@ -64,6 +65,8 @@ async function markTarget(d: Db, job: Job, status: 'running' | 'done' | 'failed'
       return update(d, 'shots', job.target_id, { video_status: status, ...e, ...extra });
     case 'music':
       return update(d, 'projects', job.target_id, { music_status: status, ...extra });
+    case 'poster':
+      return update(d, 'projects', job.target_id, { poster_status: status, ...extra });
     case 'render':
       return update(d, 'projects', job.target_id, {
         render_status: status,
@@ -93,7 +96,21 @@ async function startJobWork(env: Env, d: Db, jobId: string): Promise<void> {
       return submitMusic(env, d, job);
     case 'render':
       return submitRender(env, d, job);
+    case 'poster':
+      return runPoster(env, d, job);
+    case 'director':
+      return; // handled inside the request
   }
+}
+
+async function runPoster(env: Env, d: Db, job: Job): Promise<void> {
+  const p = await loadProject(d, job.project_id!);
+  if (!p.ad_brief) throw new Error('this film has no shop details');
+  const photo = p.ad_brief.photoUrl ? await readAsBase64(env, p.ad_brief.photoUrl) : null;
+  const img = await generateImage(env, { aspectRatio: '9:16', refs: photo ? [photo] : [], prompt: posterPrompt(p.ad_brief) });
+  const url = await saveImage(env, p, 'poster', p.id, img);
+  await markTarget(d, job, 'done', undefined, { poster_url: url });
+  await succeedJob(d, job.id, { url });
 }
 
 // ---------------------------------------------------------------- plan
@@ -107,6 +124,7 @@ async function runPlan(env: Env, d: Db, job: Job): Promise<void> {
     style: p.style,
     aspectRatio: p.aspect_ratio,
     targetSec: p.target_duration_sec,
+    ad: p.kind === 'ad' ? p.ad_brief : null,
   });
 
   // Replace any earlier plan for this project.
@@ -188,6 +206,8 @@ async function runKeyframe(env: Env, d: Db, job: Job): Promise<void> {
     ? ((await d.from('characters').select('*').in('id', shot.character_ids)).data as Character[]) ?? []
     : [];
   const refs: InlineImage[] = [];
+  const brandPhoto = p.kind === 'ad' && p.ad_brief?.photoUrl ? await readAsBase64(env, p.ad_brief.photoUrl) : null;
+  if (brandPhoto) refs.push(brandPhoto);
   for (const c of chars) {
     if (!c.portrait_url) continue;
     const img = await readAsBase64(env, c.portrait_url);
@@ -201,7 +221,8 @@ async function runKeyframe(env: Env, d: Db, job: Job): Promise<void> {
       shot.camera ? `Camera: ${shot.camera}.` : '',
       shot.action,
       chars.length ? `Characters in frame: ${chars.map((c) => `${c.name} — ${c.description}`).join(' | ')}` : '',
-      refs.length ? 'Keep every character exactly as in the reference images: same face, hair, skin tone and clothes.' : '',
+      brandPhoto ? 'The first reference image is the real shop/product: match its look, colours and products.' : '',
+      chars.some((c) => c.portrait_url) ? 'Keep every character exactly as in their reference images: same face, hair, skin tone and clothes.' : '',
       'No text, captions, logos or watermarks.',
     ]
       .filter(Boolean)

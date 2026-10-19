@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { Link, router, Stack } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useProjects, useWallet } from '../lib/hooks';
+import { useProjects, useRole, useWallet } from '../lib/hooks';
 import type { Project } from '../lib/types';
 import { Button, Empty } from '../ui/kit';
 import { colors, radius, space, type } from '../ui/theme';
@@ -30,6 +30,7 @@ function CreditChip() {
 
 export default function Home() {
   const { projects, reload } = useProjects();
+  const role = useRole();
   return (
     <SafeAreaView edges={['bottom']} style={{ flex: 1, backgroundColor: colors.bg }}>
       <Stack.Screen
@@ -53,6 +54,13 @@ export default function Home() {
         refreshControl={<RefreshControl refreshing={false} onRefresh={() => { reload(); }} tintColor={colors.accent} />}
         ListHeaderComponent={
           <View style={{ marginBottom: space(2) }}>
+            {role === 'operator' ? (
+              <Pressable onPress={() => router.push('/orders')} style={st.orders} accessibilityRole="button">
+                <Text style={[type.label, { color: colors.accent }]}>Studio</Text>
+                <Text style={type.heading}>Shop-ad orders →</Text>
+                <Text style={type.small}>Take orders, make Reels and posters, deliver on WhatsApp, track payments.</Text>
+              </Pressable>
+            ) : null}
             <Text style={type.display}>Your films</Text>
           </View>
         }
@@ -120,4 +128,5 @@ const st = StyleSheet.create({
     justifyContent: 'center',
   },
   fab: { position: 'absolute', left: space(2), right: space(2), bottom: space(3) },
+  orders: { backgroundColor: colors.accentSoft, borderColor: colors.accent, borderWidth: 1, borderRadius: radius.lg, padding: space(2), marginBottom: space(2.5), gap: 4 },
 });

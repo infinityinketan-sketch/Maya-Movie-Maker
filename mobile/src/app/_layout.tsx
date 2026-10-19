@@ -34,6 +34,9 @@ function Navigator() {
         <Stack.Screen name="shot/[id]" options={{ title: 'Shot' }} />
         <Stack.Screen name="wallet" options={{ title: 'Credits' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="orders" options={{ title: 'Shop-ad orders' }} />
+        <Stack.Screen name="order/new" options={{ title: 'New order', presentation: 'modal' }} />
+        <Stack.Screen name="order/[id]" options={{ title: 'Order' }} />
       </Stack.Protected>
       <Stack.Protected guard={!session}>
         <Stack.Screen name="login" options={{ headerShown: false }} />

@@ -123,9 +123,10 @@ export function catalog(cfg: PriceConfig) {
   );
   return {
     creditValueInr: 1,
+    markup: cfg.markup,
     image: creditsFor(imageCostUsd(), cfg),
     music: creditsFor(musicCostUsd(), cfg),
-    planPerDuration: Object.fromEntries([15, 30, 60, 120, 300].map((s) => [s, creditsFor(planCostUsd(s), cfg)])),
+    planPerDuration: Object.fromEntries([15, 20, 30, 60, 120, 300].map((s) => [s, creditsFor(planCostUsd(s), cfg)])),
     renderPerMinute: creditsFor(renderCostUsd(60), cfg),
     tiers: perTier,
     packs: CREDIT_PACKS,

@@ -1,6 +1,6 @@
 import { config } from './config';
 import { supabase } from './supabase';
-import type { CameraGroup, Catalog, Character, DirectorOption, FilmReview, Project, Shot, Tier } from './types';
+import type { AdOrder, OrderStatus, CameraGroup, Catalog, Character, DirectorOption, FilmReview, Project, Shot, Tier } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -33,9 +33,23 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return json as T;
 }
 
+/** Uploads a picked photo (local file uri) and returns its public URL. */
+async function uploadPhoto(uri: string, mimeType: string): Promise<{ url: string }> {
+  const { data } = await supabase.auth.getSession();
+  const blob = await (await fetch(uri)).blob();
+  const res = await fetch(`${config.apiUrl}/v1/uploads/photo`, {
+    method: 'POST',
+    headers: { 'content-type': mimeType, authorization: `Bearer ${data.session?.access_token ?? ''}` },
+    body: blob,
+  });
+  const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string; message?: string };
+  if (!res.ok || !json.url) throw new ApiError(res.status, json.error ?? 'upload', json.message ?? 'Photo upload failed.');
+  return { url: json.url };
+}
+
 export const api = {
   catalog: () => call<Catalog>('GET', '/v1/catalog'),
-  me: () => call<{ balance: number; director: boolean }>('GET', '/v1/me'),
+  me: () => call<{ balance: number; director: boolean; role: 'user' | 'operator' }>('GET', '/v1/me'),
   deleteAccount: () => call<{ ok: true }>('DELETE', '/v1/me'),
 
   createProject: (input: {
@@ -71,6 +85,28 @@ export const api = {
   cameraLibrary: () => call<{ groups: CameraGroup[] }>('GET', '/v1/director/library'),
   direct: (shotId: string) => call<{ options: DirectorOption[]; credits: number }>('POST', `/v1/shots/${shotId}/direct`),
   review: (projectId: string) => call<FilmReview>('POST', `/v1/projects/${projectId}/review`),
+
+  orderOptions: () => call<{ businessTypes: string[]; occasions: string[]; lengths: number[] }>('GET', '/v1/orders/options'),
+  createOrder: (input: {
+    customer_name: string;
+    customer_phone: string;
+    business_name: string;
+    business_type: string;
+    area?: string;
+    offer: string;
+    occasion?: string;
+    language: string;
+    contact_line?: string;
+    photo_url?: string;
+    price_inr: number;
+    target_duration_sec: number;
+    tier: Tier;
+    notes?: string;
+  }) => call<{ order: AdOrder; project: Project }>('POST', '/v1/orders', input),
+  updateOrder: (id: string, patch: { status?: OrderStatus; price_inr?: number; notes?: string }) => call<AdOrder>('PATCH', `/v1/orders/${id}`, patch),
+  orderWhatsapp: (id: string) => call<{ link: string; message: string }>('GET', `/v1/orders/${id}/whatsapp`),
+  poster: (projectId: string) => call('POST', `/v1/projects/${projectId}/poster`),
+  uploadPhoto,
 
   verifyPlayPurchase: (productId: string, purchaseToken: string) =>
     call<{ ok: true; balance: number; credits: number }>('POST', '/v1/billing/google-play/verify', { productId, purchaseToken }),

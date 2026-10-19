@@ -2,7 +2,7 @@ import type { Session } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { supabase } from './supabase';
-import type { CameraGroup, Catalog, Character, LedgerRow, Project, Scene, Shot } from './types';
+import type { AdOrder, CameraGroup, Catalog, Character, LedgerRow, Project, Scene, Shot } from './types';
 
 // ---------------------------------------------------------------- session
 
@@ -198,4 +198,65 @@ export function useCameraLibrary() {
       .catch(() => undefined);
   }, []);
   return groups;
+}
+
+// ---------------------------------------------------------------- studio operator (shop-ad orders)
+
+export function useRole() {
+  const { session } = useSession();
+  const userId = session?.user.id;
+  const [role, setRole] = useState<'user' | 'operator' | null>(null);
+  useEffect(() => {
+    if (!userId) return;
+    Promise.resolve(
+      supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle()
+        .then((r) => setRole((r.data?.role as 'user' | 'operator') ?? 'user')),
+    ).catch(() => undefined);
+  }, [userId]);
+  return role;
+}
+
+export function useOrders() {
+  const { session } = useSession();
+  const [orders, setOrders] = useState<AdOrder[] | null>(null);
+  const load = useCallback(
+    () =>
+      Promise.resolve(
+        supabase
+          .from('ad_orders')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .then((r) => setOrders((r.data as AdOrder[]) ?? [])),
+      ),
+    [],
+  );
+  useEffect(() => {
+    if (session) load().catch(() => undefined);
+  }, [session, load]);
+  useRealtime('orders', [{ table: 'ad_orders', filter: `user_id=eq.${session?.user.id}` }], load, Boolean(session));
+  return { orders, reload: load };
+}
+
+export function useOrder(id: string | undefined) {
+  const [order, setOrder] = useState<AdOrder | null>(null);
+  const load = useCallback(() => {
+    if (!id) return Promise.resolve();
+    return Promise.resolve(
+      supabase
+        .from('ad_orders')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle()
+        .then((r) => setOrder((r.data as AdOrder) ?? null)),
+    );
+  }, [id]);
+  useEffect(() => {
+    load().catch(() => undefined);
+  }, [load]);
+  useRealtime('order', [{ table: 'ad_orders', filter: `id=eq.${id}` }], load, Boolean(id));
+  return { order, reload: load };
 }

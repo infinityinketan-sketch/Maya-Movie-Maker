@@ -8,7 +8,7 @@ import { useCatalog, useDirectorAccess, useProject, useWallet } from '../../lib/
 import type { Catalog, Character, FilmReview, Project, ReviewNote, Scene, Shot } from '../../lib/types';
 import { DirectorLocked, ReviewView } from '../../ui/director';
 import { Button, Card, Chip, confirmSpend, Empty, Field, Screen, SectionLabel, showError, StatusPill } from '../../ui/kit';
-import { aspectOf, Player, saveVideoToPhone, shareVideo } from '../../ui/media';
+import { aspectOf, Player, saveImageToPhone, saveVideoToPhone, shareImage, shareVideo } from '../../ui/media';
 import { colors, radius, space, type } from '../../ui/theme';
 
 type Step = 'story' | 'cast' | 'board' | 'film';
@@ -562,6 +562,35 @@ function FilmStep({ project, shots, cat, balance }: Ctx) {
           onPress={() => run('render', { action: 'Make the final cut', credits: renderCost, balance }, () => api.render(project.id))}
         />
       </Card>
+
+      {project.kind === 'ad' ? (
+        <>
+          <SectionLabel right={<StatusPill status={project.poster_status} />}>WhatsApp poster</SectionLabel>
+          <Card>
+            {project.poster_url ? (
+              <View style={{ width: '60%', aspectRatio: 9 / 16, alignSelf: 'center', borderRadius: radius.md, overflow: 'hidden', marginBottom: space(1.5) }}>
+                <Image source={{ uri: project.poster_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
+              </View>
+            ) : null}
+            <Text style={type.small}>A Status-size poster with the shop name, offer and contact written on it, using the shop photo. Check the spelling before sending.</Text>
+            <Button
+              title={project.poster_url ? 'New poster' : 'Make poster'}
+              kind="secondary"
+              cost={cat.image}
+              disabled={project.poster_status === 'queued' || project.poster_status === 'running'}
+              loading={busy === 'poster'}
+              style={{ marginTop: space(1.5) }}
+              onPress={() => run('poster', { action: 'Make the poster', credits: cat.image, balance }, () => api.poster(project.id))}
+            />
+            {project.poster_url ? (
+              <View style={{ flexDirection: 'row', gap: space(1), marginTop: space(1) }}>
+                <Button title="Save" kind="ghost" style={{ flex: 1 }} loading={busy === 'psave'} onPress={() => run('psave', null, () => saveImageToPhone(project.poster_url!, `${project.title} poster`))} />
+                <Button title="Share" kind="ghost" style={{ flex: 1 }} loading={busy === 'pshare'} onPress={() => run('pshare', null, () => shareImage(project.poster_url!, `${project.title} poster`))} />
+              </View>
+            ) : null}
+          </Card>
+        </>
+      ) : null}
 
       <SectionLabel>Quality</SectionLabel>
       <View style={{ flexDirection: 'row', gap: 8 }}>

@@ -23,7 +23,6 @@
       "predictiveBackGestureEnabled": false,
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
-        "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_AUDIO"
       ]
     },
@@ -42,6 +41,7 @@
         {
           "savePhotosPermission": "Allow Maya to save your finished films to your gallery.",
           "granularPermissions": [
+            "photo",
             "video"
           ]
         }
@@ -61,7 +61,15 @@
           }
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose a photo of the shop or product for the ad.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false,

@@ -50,6 +50,28 @@ export async function saveVideoToPhone(url: string, title: string): Promise<void
   Alert.alert('Saved', 'Your film is in your gallery.');
 }
 
+export async function saveImageToPhone(url: string, title: string): Promise<void> {
+  const { status } = await requestPermissionsAsync(true, ['photo']);
+  if (status !== 'granted') {
+    Alert.alert('Permission needed', 'Allow Maya to save pictures so the poster can go to your gallery.');
+    return;
+  }
+  const ext = url.split('?')[0].split('.').pop() || 'png';
+  const file = await downloadToCache(url, `${safeName(title)}.${ext}`);
+  await Asset.create(file.uri);
+  Alert.alert('Saved', 'The poster is in your gallery.');
+}
+
+export async function shareImage(url: string, title: string): Promise<void> {
+  const ext = url.split('?')[0].split('.').pop() || 'png';
+  const file = await downloadToCache(url, `${safeName(title)}.${ext}`);
+  if (!(await Sharing.isAvailableAsync())) {
+    Alert.alert('Sharing is not available on this phone');
+    return;
+  }
+  await Sharing.shareAsync(file.uri, { mimeType: ext === 'jpg' ? 'image/jpeg' : `image/${ext}`, dialogTitle: title });
+}
+
 export async function shareVideo(url: string, title: string): Promise<void> {
   const file = await downloadToCache(url, `${safeName(title)}.mp4`);
   if (!(await Sharing.isAvailableAsync())) {

@@ -119,5 +119,24 @@ begin
 end $$;
 reset role;
 
+-- Shop-ad orders: operators' orders are private, users cannot make themselves operators
+insert into public.ad_orders (user_id, customer_name, customer_phone, business_name, business_type, offer)
+values ('00000000-0000-0000-0000-00000000000a', 'Sunil', '9800000000', 'Sunil Sweets', 'Sweet shop', '20% off on Diwali boxes');
+
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+do $$
+declare n integer; denied boolean := false;
+begin
+  select count(*) into n from public.ad_orders;
+  assert n = 0, 'user B must not see user A orders';
+  begin
+    update public.profiles set role = 'operator';
+  exception when insufficient_privilege then denied := true;
+  end;
+  assert denied, 'users must not be able to make themselves operators';
+end $$;
+reset role;
+
 rollback;
 \echo 'ALL CREDIT TESTS PASSED'

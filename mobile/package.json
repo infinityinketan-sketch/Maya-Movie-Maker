@@ -16,6 +16,7 @@
     "expo-haptics": "~58.0.7",
     "expo-iap": "^6.1.0",
     "expo-image": "~58.0.15",
+    "expo-image-picker": "~58.0.10",
     "expo-linking": "~58.0.13",
     "expo-media-library": "~58.0.10",
     "expo-router": "~58.0.23",

@@ -14,7 +14,7 @@ From zero to the app running on your phone, then on the Play Store. Do the steps
 ## 1. Supabase (database + login) — free while building, $25/month in production
 
 1. Create a project at supabase.com (region: Mumbai `ap-south-1`).
-2. **Database:** open *SQL Editor*, paste and run each file in `supabase/migrations/` in name order (`…0001_init.sql`, then `…0002_director.sql`). (Or with the CLI: `supabase link` then `supabase db push`.)
+2. **Database:** open *SQL Editor*, paste and run each file in `supabase/migrations/` in name order (`…0001_init.sql`, `…0002_director.sql`, `…0003_shop_ads.sql`). (Or with the CLI: `supabase link` then `supabase db push`.)
 3. **Login by email code:** *Authentication → Sign In / Providers → Email*: enable Email, keep "Confirm email" on.
    *Authentication → Emails → Templates → Magic Link*: replace the body so it shows the code, e.g.
    `<h2>Your Maya login code</h2><p style="font-size:28px"><b>{{ .Token }}</b></p>`
@@ -91,6 +91,13 @@ where id = (select id from auth.users where email = 'you@example.com');
 ```
 
 Run `supabase/migrations/20261018000002_director.sql` after the first migration (step 1) if you set up the database before this feature existed.
+
+**Turn on the shop-ad studio for your account:**
+
+```sql
+update public.profiles set role = 'operator'
+where id = (select id from auth.users where email = 'you@example.com');
+```
 
 **First test film:** 15 seconds, Draft quality, vertical. Costs roughly 11 (story) + 14 per character + 14 per frame + 80 per shot ≈ 300 credits ≈ $1 of API spend.
 

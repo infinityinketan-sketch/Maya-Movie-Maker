@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
-import { balanceOf, db, getOwnedCharacter, getOwnedProject, getOwnedShot, must, type Shot } from './db';
+import { balanceOf, db, getOwnedCharacter, getOwnedProject, getOwnedShot, must, type AdOrder, type Project, type Shot } from './db';
 import { HttpError, type AppUser, type Env, type JobMessage } from './env';
+import { AD_LENGTHS, adIdea, BUSINESS_TYPES, OCCASIONS, waLink, waMessage, type AdBrief } from './ads';
 import { CAMERA_LIBRARY, directCostUsd, directorPrices, directShot, reviewCostUsd, reviewFilm, type ShotContext } from './director';
 import { assertCanAfford, chargeJob, failJob, startJob, succeedJob } from './jobs';
 import { verifyFalWebhook, type FalWebhook } from './providers/fal';
@@ -23,7 +24,7 @@ import {
   videoCostUsd,
   type Tier,
 } from './pricing';
-import { deletePrefix } from './storage';
+import { deletePrefix, keyFromUrl, mediaKey, putBytes } from './storage';
 import { handleCron, handleQueue } from './worker';
 
 type App = { Bindings: Env; Variables: { user: AppUser } };
@@ -106,7 +107,8 @@ function clean(o: Record<string, unknown>) {
 app.get('/v1/me', async (c) => {
   const user = c.get('user');
   const d = db(c.env);
-  return c.json({ user, balance: await balanceOf(d, user.id), director: await hasDirector(d, user.id) });
+  const prof = await d.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  return c.json({ user, balance: await balanceOf(d, user.id), director: await hasDirector(d, user.id), role: prof.data?.role ?? 'user' });
 });
 
 /** Play Store policy: users must be able to delete their account and data in the app. */
@@ -482,6 +484,149 @@ app.post('/v1/projects/:id/review', async (c) => {
     throw new HttpError(502, 'director_failed', 'The Director could not answer just now. Your credits were returned.');
   }
 });
+
+// ---------------------------------------------------------------- shop-ad orders (operator)
+
+async function requireOperator(d: ReturnType<typeof db>, userId: string): Promise<void> {
+  const res = await d.from('profiles').select('role').eq('id', userId).maybeSingle();
+  if (res.data?.role !== 'operator') throw new HttpError(403, 'not_operator', 'Shop-ad orders are only for the studio account.');
+}
+
+/** Photo of the customer's shop or product, used as a reference in every frame and on the poster. */
+app.post('/v1/uploads/photo', async (c) => {
+  const user = c.get('user');
+  const type = (c.req.header('content-type') || '').split(';')[0].trim();
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) throw new HttpError(415, 'bad_type', 'Send a JPG, PNG or WebP photo.');
+  const bytes = await c.req.arrayBuffer();
+  if (bytes.byteLength < 1000 || bytes.byteLength > 8 * 1024 * 1024) throw new HttpError(413, 'bad_size', 'Photos must be under 8 MB.');
+  const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg';
+  const url = await putBytes(c.env, mediaKey(user.id, 'uploads', 'photo', crypto.randomUUID(), ext), bytes, type);
+  return c.json({ url }, 201);
+});
+
+app.post('/v1/orders', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  await requireOperator(d, user.id);
+  const b = await body(c);
+  const photoUrl = optText(b.photo_url, 500) ?? null;
+  if (photoUrl && !keyFromUrl(c.env, photoUrl)?.startsWith(`u/${user.id}/`)) throw new HttpError(400, 'invalid', 'Upload the photo through the app first.');
+  const brief: AdBrief = {
+    businessName: text(b.business_name, 2, 80, 'Shop name'),
+    businessType: BUSINESS_TYPES.includes(b.business_type as string) ? (b.business_type as string) : 'Other',
+    area: optText(b.area, 80) ?? null,
+    offer: text(b.offer, 3, 200, 'Offer'),
+    occasion: OCCASIONS.includes(b.occasion as string) ? (b.occasion as string) : null,
+    language: ['Marathi', 'Hindi', 'English'].includes(b.language as string) ? (b.language as string) : 'Marathi',
+    contactLine: optText(b.contact_line, 120) ?? null,
+    photoUrl,
+  };
+  const target = AD_LENGTHS.includes(Number(b.target_duration_sec)) ? Number(b.target_duration_sec) : 20;
+  const tier = (TIERS as string[]).includes(b.tier as string) ? (b.tier as Tier) : 'budget';
+  const project = must(
+    await d
+      .from('projects')
+      .insert({
+        user_id: user.id,
+        kind: 'ad',
+        ad_brief: brief,
+        title: brief.businessName,
+        idea: adIdea(brief),
+        genre: 'Ad / promo',
+        language: brief.language,
+        style: 'bright commercial look, warm inviting light, crisp 35mm, festive Indian colours',
+        aspect_ratio: '9:16',
+        target_duration_sec: target,
+        tier,
+      })
+      .select('*')
+      .single(),
+    'project',
+  ) as Project;
+  const order = must(
+    await d
+      .from('ad_orders')
+      .insert({
+        user_id: user.id,
+        project_id: project.id,
+        customer_name: text(b.customer_name, 2, 80, 'Customer name'),
+        customer_phone: text(b.customer_phone, 10, 20, 'Customer phone'),
+        business_name: brief.businessName,
+        business_type: brief.businessType,
+        area: brief.area,
+        offer: brief.offer,
+        occasion: brief.occasion,
+        language: brief.language,
+        contact_line: brief.contactLine,
+        photo_url: brief.photoUrl,
+        price_inr: Math.max(0, Math.round(Number(b.price_inr) || 499)),
+        notes: optText(b.notes, 1000) ?? null,
+      })
+      .select('*')
+      .single(),
+    'order',
+  );
+  return c.json({ order, project }, 201);
+});
+
+const ORDER_STATUSES = ['new', 'producing', 'ready', 'delivered', 'paid', 'cancelled'];
+
+app.patch('/v1/orders/:id', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  await requireOperator(d, user.id);
+  const cur = must(await d.from('ad_orders').select('*').eq('id', c.req.param('id')).eq('user_id', user.id).maybeSingle(), 'order') as AdOrder;
+  const b = await body(c);
+  const status = ORDER_STATUSES.includes(b.status as string) ? (b.status as string) : undefined;
+  const patch = clean({
+    status,
+    price_inr: b.price_inr !== undefined ? Math.max(0, Math.round(Number(b.price_inr) || 0)) : undefined,
+    notes: optText(b.notes, 1000),
+    delivered_at: status === 'delivered' && !cur.delivered_at ? new Date().toISOString() : undefined,
+    paid_at: status === 'paid' && !cur.paid_at ? new Date().toISOString() : undefined,
+  });
+  return c.json(must(await d.from('ad_orders').update(patch).eq('id', cur.id).select('*').single(), 'order'));
+});
+
+/** Ready-made WhatsApp chat link with the Reel and poster links for the customer. */
+app.get('/v1/orders/:id/whatsapp', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  await requireOperator(d, user.id);
+  const o = must(await d.from('ad_orders').select('*').eq('id', c.req.param('id')).eq('user_id', user.id).maybeSingle(), 'order') as AdOrder;
+  const p = o.project_id ? (await d.from('projects').select('final_video_url,poster_url').eq('id', o.project_id).maybeSingle()).data : null;
+  const message = waMessage({
+    customerName: o.customer_name,
+    businessName: o.business_name,
+    videoUrl: p?.final_video_url ?? null,
+    posterUrl: p?.poster_url ?? null,
+    priceInr: o.price_inr,
+    paid: o.status === 'paid',
+  });
+  return c.json({ link: waLink(o.customer_phone, message), message });
+});
+
+app.post('/v1/projects/:id/poster', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  const p = await getOwnedProject(d, user.id, c.req.param('id'));
+  if (p.kind !== 'ad') throw new HttpError(400, 'not_ad', 'Posters are made for shop ads.');
+  const cost = imageCostUsd();
+  const job = await startJob(c.env, d, {
+    userId: user.id,
+    projectId: p.id,
+    targetId: p.id,
+    kind: 'poster',
+    credits: creditsFor(cost, priceConfig(c.env)),
+    costUsd: cost,
+    provider: 'google',
+    model: c.env.GEMINI_IMAGE_MODEL || 'gemini-nano-banana-2.1',
+  });
+  await d.from('projects').update({ poster_status: 'queued' }).eq('id', p.id);
+  return c.json({ job }, 202);
+});
+
+app.get('/v1/orders/options', (c) => c.json({ businessTypes: BUSINESS_TYPES, occasions: OCCASIONS, lengths: AD_LENGTHS }));
 
 // ---------------------------------------------------------------- billing
 

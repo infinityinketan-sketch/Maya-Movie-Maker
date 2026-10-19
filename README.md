@@ -25,6 +25,15 @@ Unlocked automatically by the first credit-pack purchase.
 
 The same film-craft rules also guide the story writer for every user, so first drafts already plan varied, motivated shots.
 
+### Shop-ad studio (operator account)
+
+For selling done-for-you ads to local businesses over WhatsApp. Visible only to accounts with the `operator` role.
+
+1. **New order:** customer name and WhatsApp number, shop name and type, area, offer, occasion (Diwali, Ganpati, Gudi Padwa…), Marathi/Hindi/English, length (15/20/30 s), quality, price. Add a photo of the real shop or product. The form shows your API cost and profit before you start.
+2. **Studio:** Maya writes an ad-shaped script (hook → shop and happy customers → owner saying the offer and shop name). The shop photo is a reference in every storyboard frame. Film, add music and cut as usual.
+3. **Poster:** a WhatsApp Status poster with the shop name, offer and contact written in Devanagari or Latin script, built from the shop photo (14 credits).
+4. **Deliver:** send the Reel and poster files, or open the customer's WhatsApp chat with the links and the amount due. Mark delivered and paid; the orders screen totals earned and to-collect.
+
 1 credit sells for ₹1. Every action costs **API price × 3** in credits (rounded up), so even a user who spends every credit through Google Play (18% GST + 15% Play fee) leaves a profit. Failed jobs refund automatically. See `backend/src/pricing.ts` and the tests in `backend/test/pricing.test.ts`.
 
 ## Repository

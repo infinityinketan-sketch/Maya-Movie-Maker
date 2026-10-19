@@ -21,9 +21,46 @@ export interface Project {
   final_video_url: string | null;
   thumbnail_url: string | null;
   render_status: GenStatus;
+  kind: 'film' | 'ad';
+  ad_brief: AdBrief | null;
+  poster_url: string | null;
+  poster_status: GenStatus;
   error: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface AdBrief {
+  businessName: string;
+  businessType: string;
+  area: string | null;
+  offer: string;
+  occasion: string | null;
+  language: string;
+  contactLine: string | null;
+  photoUrl: string | null;
+}
+
+export type OrderStatus = 'new' | 'producing' | 'ready' | 'delivered' | 'paid' | 'cancelled';
+export interface AdOrder {
+  id: string;
+  project_id: string | null;
+  customer_name: string;
+  customer_phone: string;
+  business_name: string;
+  business_type: string;
+  area: string | null;
+  offer: string;
+  occasion: string | null;
+  language: string;
+  contact_line: string | null;
+  photo_url: string | null;
+  price_inr: number;
+  status: OrderStatus;
+  notes: string | null;
+  delivered_at: string | null;
+  paid_at: string | null;
+  created_at: string;
 }
 
 export interface Character {
@@ -84,6 +121,7 @@ export interface CreditPack {
 
 export interface Catalog {
   creditValueInr: number;
+  markup: number;
   image: number;
   music: number;
   planPerDuration: Record<string, number>;

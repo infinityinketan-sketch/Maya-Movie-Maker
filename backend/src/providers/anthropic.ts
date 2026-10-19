@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { adPlanPrompt } from '../ads';
 import { planMaxTokens, shotsFor, snapDuration, UNIT_USD } from '../pricing';
 
 export interface PlannedShot {
@@ -19,6 +20,7 @@ export interface FilmPlan {
 }
 
 export interface PlanInput {
+  ad?: import('../ads').AdBrief | null;
   idea: string;
   genre: string | null;
   language: string;
@@ -86,6 +88,9 @@ const PLAN_TOOL = {
 
 export function planPrompt(p: PlanInput): string {
   const shots = shotsFor(p.targetSec);
+  if (p.ad) {
+    return `${adPlanPrompt(p.ad, p.targetSec, shots)}\nRules: no real celebrities, no competitor brands, nothing misleading about the offer; suitable for a general audience.`;
+  }
   return [
     `Write a production plan for a ${p.targetSec}-second ${p.genre ? p.genre + ' ' : ''}short film.`,
     `Idea from the director: """${p.idea.slice(0, 4000)}"""`,

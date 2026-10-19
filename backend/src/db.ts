@@ -32,6 +32,22 @@ export interface Project {
   music_prompt: string | null;
   music_url: string | null;
   final_video_url: string | null;
+  kind: 'film' | 'ad';
+  ad_brief: import('./ads').AdBrief | null;
+  poster_url: string | null;
+}
+
+export interface AdOrder {
+  id: string;
+  user_id: string;
+  project_id: string | null;
+  customer_name: string;
+  customer_phone: string;
+  business_name: string;
+  price_inr: number;
+  status: string;
+  delivered_at: string | null;
+  paid_at: string | null;
 }
 
 export interface Character {
