@@ -35,6 +35,14 @@ For selling done-for-you ads to local businesses over WhatsApp. Visible only to 
 4. **Advance first:** no free work. An order waits as *Waiting for advance* until at least 50% of the price is recorded; the server refuses to start the script before that. One tap sends the customer a WhatsApp message asking for the advance.
 5. **Deliver:** send the Reel and poster files, or open the customer's WhatsApp chat with the links and the balance due. Mark delivered and fully paid; the orders screen totals received and still to collect.
 
+### When providers are busy, crash or return junk
+
+- **Busy / overloaded / timed out** (429, 5xx, 529, network): the job is retried automatically after 10 s, 30 s and 90 s — credits stay held, nothing is generated twice. After the third try it fails and refunds.
+- **Real errors** (bad request, safety block): fail at once and refund — no paid retry loops.
+- **Broken results:** every result is checked before it is kept — videos must be real MP4s with picture and sound, the expected length and the right shape (9:16 or 16:9); pictures and music must be the right type and size. A failed check refunds.
+- **Lost results:** if fal.ai's callback never arrives, the 30-minute check asks fal.ai directly and collects a finished result; a job still being made is left alone for up to 3 hours, then refunded.
+- **AI Director** calls retry twice within the request (1 s, 3 s) before refunding.
+
 1 credit sells for ₹1. Every action costs **API price × 3** in credits (rounded up), so even a user who spends every credit through Google Play (18% GST + 15% Play fee) leaves a profit. Failed jobs refund automatically. See `backend/src/pricing.ts` and the tests in `backend/test/pricing.test.ts`.
 
 ## Repository

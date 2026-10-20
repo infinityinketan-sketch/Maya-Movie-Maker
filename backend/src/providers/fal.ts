@@ -1,16 +1,36 @@
 import type { Env } from '../env';
+import { providerFetch } from '../reliability';
 
-/** Submits to the fal.ai queue; the result arrives later at /v1/webhooks/fal. */
-export async function falSubmit(env: Env, endpoint: string, input: Record<string, unknown>): Promise<string> {
+export interface FalSubmission {
+  requestId: string;
+  statusUrl: string | null;
+  responseUrl: string | null;
+}
+
+/** Submits to the fal.ai queue; the result arrives later at /v1/webhooks/fal. Busy errors are retried by the caller. */
+export async function falSubmit(env: Env, endpoint: string, input: Record<string, unknown>): Promise<FalSubmission> {
   const webhook = `${env.PUBLIC_API_BASE.replace(/\/$/, '')}/v1/webhooks/fal`;
-  const res = await fetch(`https://queue.fal.run/${endpoint}?fal_webhook=${encodeURIComponent(webhook)}`, {
+  const res = await providerFetch('fal.ai', `https://queue.fal.run/${endpoint}?fal_webhook=${encodeURIComponent(webhook)}`, {
     method: 'POST',
     headers: { Authorization: `Key ${env.FAL_KEY}`, 'content-type': 'application/json' },
     body: JSON.stringify(input),
-  });
-  const body = (await res.json().catch(() => ({}))) as { request_id?: string; detail?: unknown };
-  if (!res.ok || !body.request_id) throw new Error(`fal.ai submit failed (${res.status}): ${JSON.stringify(body.detail ?? body).slice(0, 300)}`);
-  return body.request_id;
+  }, 30_000);
+  const body = (await res.json().catch(() => ({}))) as { request_id?: string; status_url?: string; response_url?: string; detail?: unknown };
+  if (!res.ok || !body.request_id) throw new Error(`fal.ai refused the request (${res.status}): ${JSON.stringify(body.detail ?? body).slice(0, 300)}`);
+  return { requestId: body.request_id, statusUrl: body.status_url ?? null, responseUrl: body.response_url ?? null };
+}
+
+export type FalLookup = { state: 'pending' } | { state: 'done'; ok: boolean; payload: unknown; error?: string };
+
+/** Asks fal.ai directly what happened to a request whose webhook never arrived. */
+export async function falLookup(env: Env, statusUrl: string, responseUrl: string): Promise<FalLookup> {
+  const headers = { Authorization: `Key ${env.FAL_KEY}` };
+  const st = (await (await providerFetch('fal.ai', statusUrl, { headers }, 20_000)).json().catch(() => ({}))) as { status?: string };
+  if (st.status === 'IN_QUEUE' || st.status === 'IN_PROGRESS') return { state: 'pending' };
+  const res = await providerFetch('fal.ai', responseUrl, { headers }, 20_000);
+  const payload = await res.json().catch(() => null);
+  if (!res.ok) return { state: 'done', ok: false, payload, error: `fal.ai reported an error (${res.status})` };
+  return { state: 'done', ok: true, payload };
 }
 
 export interface FalWebhook {

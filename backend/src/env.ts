@@ -23,8 +23,8 @@ export interface Env {
 }
 
 export type JobMessage =
-  | { type: 'start'; jobId: string }
-  | { type: 'finalize'; jobId: string; ok: boolean; result?: unknown; error?: string };
+  | { type: 'start'; jobId: string; attempt?: number }
+  | { type: 'finalize'; jobId: string; ok: boolean; result?: unknown; error?: string; attempt?: number };
 
 export type JobKind = 'plan' | 'portrait' | 'keyframe' | 'video' | 'music' | 'render' | 'director' | 'poster';
 

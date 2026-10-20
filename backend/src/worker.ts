@@ -1,14 +1,16 @@
-// Queue consumer: runs each paid job exactly once. Any error refunds the credits
-// (fail_job) instead of retrying, so a flaky provider can never multiply our costs.
+// Queue consumer: runs each paid job once. A busy/overloaded provider is retried after
+// 10 s, 30 s and 90 s (nothing was generated yet, so nothing is paid twice); any other
+// error, or a result that fails its checks, refunds the credits (fail_job).
 import { db, must, type Character, type Db, type Job, type Project, type Shot } from './db';
 import type { Env, JobMessage } from './env';
 import { failJob, succeedJob } from './jobs';
 import { planFilm } from './providers/anthropic';
-import { falSubmit, resultUrl } from './providers/fal';
+import { falLookup, falSubmit, resultUrl, type FalSubmission } from './providers/fal';
 import { generateImage, type InlineImage } from './providers/gemini';
 import { posterPrompt } from './ads';
 import { billedSeconds, MUSIC_MODEL, RENDER_MODEL, VIDEO_MODELS, type Tier } from './pricing';
-import { copyFromUrl, fromBase64, mediaKey, putBytes, readAsBase64 } from './storage';
+import { checkMedia, ProviderBusyError, retryDelay, type MediaExpectation } from './reliability';
+import { copyFromUrl, download, fromBase64, mediaKey, putBytes, readAsBase64 } from './storage';
 
 export async function handleQueue(batch: MessageBatch<JobMessage>, env: Env): Promise<void> {
   const d = db(env);
@@ -18,6 +20,10 @@ export async function handleQueue(batch: MessageBatch<JobMessage>, env: Env): Pr
       else await finalizeJob(env, d, msg.body);
     } catch (e) {
       console.error('job error', msg.body, e);
+      if (e instanceof ProviderBusyError && (await retryLater(env, d, msg.body, e))) {
+        msg.ack();
+        continue;
+      }
       try {
         await markTarget(d, await loadJob(d, msg.body.jobId), 'failed', errText(e));
         await failJob(d, msg.body.jobId, errText(e));
@@ -29,7 +35,29 @@ export async function handleQueue(batch: MessageBatch<JobMessage>, env: Env): Pr
   }
 }
 
+/** Re-queues a job whose provider was busy. Returns false once the retries are used up. */
+async function retryLater(env: Env, d: Db, body: JobMessage, e: ProviderBusyError): Promise<boolean> {
+  const attempt = body.attempt ?? 0;
+  const delay = retryDelay(attempt);
+  if (delay === null) return false;
+  try {
+    const patch: Record<string, unknown> = { attempts: attempt + 1, error: e.message.slice(0, 300) };
+    if (body.type === 'start') patch.status = 'queued'; // run the provider call again
+    await update(d, 'jobs', body.jobId, patch);
+    await env.JOBS.send({ ...body, attempt: attempt + 1 }, { delaySeconds: delay });
+    return true;
+  } catch (inner) {
+    console.error('could not re-queue', inner);
+    return false;
+  }
+}
+
+async function saveSubmission(d: Db, jobId: string, sub: FalSubmission): Promise<void> {
+  await update(d, 'jobs', jobId, { provider_request_id: sub.requestId, provider_status_url: sub.statusUrl, provider_response_url: sub.responseUrl });
+}
+
 function errText(e: unknown): string {
+  if (e instanceof ProviderBusyError) return 'The AI service is busy right now. Your credits were returned — please try again in a few minutes.';
   return e instanceof Error ? e.message : String(e);
 }
 
@@ -235,7 +263,10 @@ async function runKeyframe(env: Env, d: Db, job: Job): Promise<void> {
 
 async function saveImage(env: Env, p: Project, kind: string, id: string, img: InlineImage): Promise<string> {
   const ext = img.mimeType.includes('jpeg') ? 'jpg' : img.mimeType.includes('webp') ? 'webp' : 'png';
-  return putBytes(env, mediaKey(p.user_id, p.id, kind, id, ext), fromBase64(img.data), img.mimeType);
+  const bytes = fromBase64(img.data);
+  const problem = checkMedia(bytes, img.mimeType, { kind: 'image' });
+  if (problem) throw new Error(`The picture was unusable: ${problem}. Your credits were returned — please try again.`);
+  return putBytes(env, mediaKey(p.user_id, p.id, kind, id, ext), bytes, img.mimeType);
 }
 
 // ---------------------------------------------------------------- fal.ai (async, finished by webhook)
@@ -260,21 +291,21 @@ async function submitVideo(env: Env, d: Db, job: Job): Promise<void> {
   }
   const tier = (job.input.tier as Tier) ?? p.tier;
   const model = VIDEO_MODELS[tier];
-  const requestId = await falSubmit(
+  const sub = await falSubmit(
     env,
     model.endpoint,
     model.input({ prompt: videoPrompt(p, shot, voice), imageUrl: shot.keyframe_url, seconds: billedSeconds(tier, shot.duration_sec), aspectRatio: p.aspect_ratio }),
   );
-  await update(d, 'jobs', job.id, { provider_request_id: requestId });
+  await saveSubmission(d, job.id, sub);
 }
 
 async function submitMusic(env: Env, d: Db, job: Job): Promise<void> {
   const p = await loadProject(d, job.project_id!);
-  const requestId = await falSubmit(env, MUSIC_MODEL, {
+  const sub = await falSubmit(env, MUSIC_MODEL, {
     prompt: `${p.music_prompt || 'cinematic instrumental film score'}. Instrumental only, suitable as background under dialogue.`,
     negative_prompt: 'vocals, singing, lyrics, low quality',
   });
-  await update(d, 'jobs', job.id, { provider_request_id: requestId });
+  await saveSubmission(d, job.id, sub);
 }
 
 /** Builds the fal FFmpeg compose timeline: shots back to back, music looped quietly underneath. */
@@ -301,8 +332,8 @@ async function submitRender(env: Env, d: Db, job: Job): Promise<void> {
   const shots = (await d.from('shots').select('video_url,duration_sec,idx').eq('project_id', p.id).order('idx')).data as Shot[];
   if (!shots?.length || shots.some((s) => !s.video_url)) throw new Error('every shot needs a video before rendering');
   const { tracks } = renderTracks(shots, p.music_url);
-  const requestId = await falSubmit(env, RENDER_MODEL, { tracks });
-  await update(d, 'jobs', job.id, { provider_request_id: requestId });
+  const sub = await falSubmit(env, RENDER_MODEL, { tracks });
+  await saveSubmission(d, job.id, sub);
 }
 
 // ---------------------------------------------------------------- webhook results
@@ -316,17 +347,24 @@ async function finalizeJob(env: Env, d: Db, msg: Extract<JobMessage, { type: 'fi
     return;
   }
   const out = resultUrl(job.kind, msg.result);
-  if (!out) throw new Error('provider result had no media URL');
+  if (!out) throw new Error('the provider sent no file back');
   const p = await loadProject(d, job.project_id!);
 
   if (job.kind === 'video') {
-    const url = await copyFromUrl(env, out.url, mediaKey(p.user_id, p.id, 'video', job.target_id!, 'mp4'), 'video/mp4');
-    const shot = must(await d.from('shots').select('takes,video_url,video_model').eq('id', job.target_id!).maybeSingle(), 'shot') as {
+    const shot = must(await d.from('shots').select('takes,video_url,video_model,duration_sec').eq('id', job.target_id!).maybeSingle(), 'shot') as {
       takes: number;
       video_url: string | null;
       video_model: string | null;
+      duration_sec: number;
     };
-    const label = VIDEO_MODELS[(job.input.tier as Tier) ?? p.tier]?.label ?? job.model;
+    const tier = (job.input.tier as Tier) ?? p.tier;
+    const url = await keepChecked(env, out.url, mediaKey(p.user_id, p.id, 'video', job.target_id!, 'mp4'), 'video/mp4', {
+      kind: 'video',
+      seconds: billedSeconds(tier, shot.duration_sec),
+      aspectRatio: p.aspect_ratio,
+      needsAudio: true,
+    });
+    const label = VIDEO_MODELS[tier]?.label ?? job.model;
     // Keep the previous take so two models can be compared side by side.
     await markTarget(d, job, 'done', undefined, {
       video_url: url,
@@ -338,27 +376,65 @@ async function finalizeJob(env: Env, d: Db, msg: Extract<JobMessage, { type: 'fi
     });
     await succeedJob(d, job.id, { url });
   } else if (job.kind === 'music') {
-    const url = await copyFromUrl(env, out.url, mediaKey(p.user_id, p.id, 'music', p.id, 'wav'), 'audio/wav');
+    const url = await keepChecked(env, out.url, mediaKey(p.user_id, p.id, 'music', p.id, 'wav'), 'audio/wav', { kind: 'music' });
     await markTarget(d, job, 'done', undefined, { music_url: url });
     await succeedJob(d, job.id, { url });
   } else if (job.kind === 'render') {
-    const url = await copyFromUrl(env, out.url, mediaKey(p.user_id, p.id, 'final', p.id, 'mp4'), 'video/mp4');
-    const thumb = out.thumbnail ? await copyFromUrl(env, out.thumbnail, mediaKey(p.user_id, p.id, 'final', `${p.id}-thumb`, 'jpg'), 'image/jpeg') : null;
+    const shots = ((await d.from('shots').select('duration_sec').eq('project_id', p.id)).data ?? []) as { duration_sec: number }[];
+    const seconds = shots.reduce((n, x) => n + x.duration_sec, 0);
+    const url = await keepChecked(env, out.url, mediaKey(p.user_id, p.id, 'final', p.id, 'mp4'), 'video/mp4', {
+      kind: 'render',
+      seconds,
+      aspectRatio: p.aspect_ratio,
+      needsAudio: true,
+    });
+    const thumb = out.thumbnail ? await copyFromUrl(env, out.thumbnail, mediaKey(p.user_id, p.id, 'final', `${p.id}-thumb`, 'jpg'), 'image/jpeg').catch(() => null) : null;
     await markTarget(d, job, 'done', undefined, { final_video_url: url, thumbnail_url: thumb, error: null });
     await succeedJob(d, job.id, { url, thumbnail: thumb });
   }
 }
 
+/** Above this size a file is streamed straight to storage and only its size is checked. */
+const MAX_INSPECT_BYTES = 60 * 1024 * 1024;
+
+/** Downloads a result, rejects it if it is broken (the job then fails and refunds), and stores it. */
+async function keepChecked(env: Env, sourceUrl: string, key: string, fallbackType: string, exp: MediaExpectation): Promise<string> {
+  const got = await download(sourceUrl, MAX_INSPECT_BYTES);
+  if ('tooBig' in got) return copyFromUrl(env, sourceUrl, key, got.contentType || fallbackType);
+  const type = got.contentType || fallbackType;
+  const problem = checkMedia(got.bytes, type, exp);
+  if (problem) throw new Error(`The result was unusable: ${problem}. Your credits were returned — please try again.`);
+  return putBytes(env, key, got.bytes, type.startsWith('application/') ? fallbackType : type);
+}
+
 // ---------------------------------------------------------------- cron
 
-/** Refunds jobs a provider never answered, and expires old credits. */
+/**
+ * Every 30 minutes: jobs with no news for 45 minutes are looked up at fal.ai — a finished result is
+ * collected, one still running is left alone (up to 3 hours), anything else fails and refunds.
+ * Also expires old credits.
+ */
 export async function handleCron(env: Env): Promise<void> {
   const d = db(env);
   const cutoff = new Date(Date.now() - 45 * 60_000).toISOString();
+  const giveUpBefore = Date.now() - 3 * 3600_000;
   const stuck = await d.from('jobs').select('*').in('status', ['queued', 'running']).lt('updated_at', cutoff).limit(200);
-  for (const job of (stuck.data ?? []) as Job[]) {
+  for (const job of (stuck.data ?? []) as (Job & { created_at: string })[]) {
+    try {
+      if (job.status === 'running' && job.provider_status_url && job.provider_response_url) {
+        const found = await falLookup(env, job.provider_status_url, job.provider_response_url);
+        if (found.state === 'done') {
+          await env.JOBS.send({ type: 'finalize', jobId: job.id, ok: found.ok, result: found.payload, error: found.error });
+          continue;
+        }
+        if (Date.parse(job.created_at) > giveUpBefore) continue; // still being made
+      }
+    } catch (e) {
+      if (Date.parse(job.created_at) > giveUpBefore) continue; // fal.ai unreachable right now: check again next run
+      console.error('lookup failed', job.id, e);
+    }
     await markTarget(d, job, 'failed', 'timed out').catch(() => undefined);
-    await failJob(d, job.id, 'timed out after 45 minutes');
+    await failJob(d, job.id, 'The provider did not finish in time. Your credits were returned.');
   }
   const exp = await d.rpc('expire_all_credits');
   if (exp.error) console.error('expire credits', exp.error.message);

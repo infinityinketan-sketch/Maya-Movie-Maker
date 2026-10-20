@@ -35,6 +35,28 @@ export async function copyFromUrl(env: Env, sourceUrl: string, key: string, fall
   return publicUrl(env, key);
 }
 
+/** Downloads a provider result into memory (so it can be checked before we keep it). */
+export async function download(url: string, maxBytes: number): Promise<{ bytes: Uint8Array; contentType: string } | { tooBig: true; contentType: string }> {
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+  } catch (e) {
+    const { ProviderBusyError } = await import('./reliability');
+    throw new ProviderBusyError(`could not download the result (${e instanceof Error ? e.name : 'network error'})`);
+  }
+  if (!res.ok) {
+    const { ProviderBusyError } = await import('./reliability');
+    throw new ProviderBusyError(`could not download the result (${res.status})`);
+  }
+  const contentType = (res.headers.get('content-type') || '').split(';')[0].trim();
+  const len = Number(res.headers.get('content-length') || 0);
+  if (len > maxBytes) {
+    await res.body?.cancel();
+    return { tooBig: true, contentType };
+  }
+  return { bytes: new Uint8Array(await res.arrayBuffer()), contentType };
+}
+
 export async function readAsBase64(env: Env, url: string): Promise<{ mimeType: string; data: string } | null> {
   const key = keyFromUrl(env, url);
   if (!key) return null;

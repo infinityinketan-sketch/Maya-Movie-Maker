@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { adPlanPrompt } from '../ads';
+import { providerFetch } from '../reliability';
 import { planMaxTokens, shotsFor, snapDuration, UNIT_USD } from '../pricing';
 
 export interface PlannedShot {
@@ -118,7 +119,7 @@ export async function callClaudeTool<T>(
   env: Env,
   opts: { system: string; prompt: string; tool: { name: string; description: string; input_schema: unknown }; maxTokens: number },
 ): Promise<{ input: T; costUsd: number }> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await providerFetch('Claude', 'https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'x-api-key': env.ANTHROPIC_API_KEY,
@@ -133,7 +134,7 @@ export async function callClaudeTool<T>(
       tool_choice: { type: 'tool', name: opts.tool.name },
       messages: [{ role: 'user', content: opts.prompt }],
     }),
-  });
+  }, 240_000);
   const body = (await res.json()) as {
     content?: { type: string; input?: unknown }[];
     usage?: { input_tokens: number; output_tokens: number };

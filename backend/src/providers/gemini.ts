@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { providerFetch } from '../reliability';
 
 export interface InlineImage {
   mimeType: string;
@@ -14,7 +15,7 @@ export async function generateImage(
   const parts: unknown[] = [{ text: opts.prompt }];
   for (const r of (opts.refs ?? []).slice(0, 4)) parts.push({ inlineData: { mimeType: r.mimeType, data: r.data } });
 
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  const res = await providerFetch('Gemini', `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -24,7 +25,7 @@ export async function generateImage(
         imageConfig: { aspectRatio: opts.aspectRatio, imageSize: '2K' },
       },
     }),
-  });
+  }, 120_000);
   const body = (await res.json()) as {
     candidates?: { content?: { parts?: { inlineData?: InlineImage; inline_data?: { mime_type: string; data: string } }[] }; finishReason?: string }[];
     promptFeedback?: { blockReason?: string };

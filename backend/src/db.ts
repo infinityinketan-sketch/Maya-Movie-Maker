@@ -95,6 +95,9 @@ export interface Job {
   provider: string | null;
   model: string | null;
   provider_request_id: string | null;
+  provider_status_url: string | null;
+  provider_response_url: string | null;
+  attempts: number;
   input: Record<string, unknown>;
   refunded: boolean;
 }

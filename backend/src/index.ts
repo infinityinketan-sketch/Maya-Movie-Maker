@@ -4,6 +4,7 @@ import { HttpError, type AppUser, type Env, type JobMessage } from './env';
 import { AD_LENGTHS, adIdea, BUSINESS_TYPES, minAdvance, OCCASIONS, waLink, waMessage, type AdBrief } from './ads';
 import { CAMERA_LIBRARY, directCostUsd, directorPrices, directShot, reviewCostUsd, reviewFilm, type ShotContext } from './director';
 import { assertCanAfford, chargeJob, failJob, startJob, succeedJob } from './jobs';
+import { ProviderBusyError, withQuickRetries } from './reliability';
 import { verifyFalWebhook, type FalWebhook } from './providers/fal';
 import { getProductPurchase } from './providers/googleplay';
 import {
@@ -442,12 +443,16 @@ app.post('/v1/shots/:id/direct', async (c) => {
     'running',
   );
   try {
-    const { options, costUsd } = await directShot(c.env, ctx);
+    const { options, costUsd } = await withQuickRetries(() => directShot(c.env, ctx));
     await succeedJob(d, job.id, { options }, costUsd);
     return c.json({ options, credits: job.credits });
   } catch (e) {
     await failJob(d, job.id, e instanceof Error ? e.message : String(e));
-    throw new HttpError(502, 'director_failed', 'The Director could not answer just now. Your credits were returned.');
+    throw new HttpError(
+      e instanceof ProviderBusyError ? 503 : 502,
+      'director_failed',
+      e instanceof ProviderBusyError ? 'The AI is very busy right now. Your credits were returned — try again in a minute.' : 'The Director could not answer just now. Your credits were returned.',
+    );
   }
 });
 
@@ -475,14 +480,18 @@ app.post('/v1/projects/:id/review', async (c) => {
     'running',
   );
   try {
-    const { review, costUsd } = await reviewFilm(c.env, filmInfo(p), scenes);
+    const { review, costUsd } = await withQuickRetries(() => reviewFilm(c.env, filmInfo(p), scenes));
     // Point each note at the real shot id so the app can apply it.
     const notes = review.notes.map((n) => ({ ...n, shotId: shots.find((s) => s.idx === n.shot - 1)?.id ?? null })).filter((n) => n.shotId);
     await succeedJob(d, job.id, { review }, costUsd);
     return c.json({ ...review, notes, credits: job.credits });
   } catch (e) {
     await failJob(d, job.id, e instanceof Error ? e.message : String(e));
-    throw new HttpError(502, 'director_failed', 'The Director could not answer just now. Your credits were returned.');
+    throw new HttpError(
+      e instanceof ProviderBusyError ? 503 : 502,
+      'director_failed',
+      e instanceof ProviderBusyError ? 'The AI is very busy right now. Your credits were returned — try again in a minute.' : 'The Director could not answer just now. Your credits were returned.',
+    );
   }
 });
 
