@@ -45,6 +45,8 @@ export interface AdOrder {
   customer_phone: string;
   business_name: string;
   price_inr: number;
+  advance_inr: number;
+  advance_at: string | null;
   status: string;
   delivered_at: string | null;
   paid_at: string | null;

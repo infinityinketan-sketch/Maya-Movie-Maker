@@ -30,6 +30,7 @@ export default function NewOrder() {
   const [length, setLength] = useState(20);
   const [tier, setTier] = useState<Tier>('budget');
   const [price, setPrice] = useState('499');
+  const [advance, setAdvance] = useState<string | null>(null);
   const [photo, setPhoto] = useState<{ uri: string; mimeType: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -51,12 +52,14 @@ export default function NewOrder() {
   const credits = cat ? filmEstimate(cat, { tier, target_duration_sec: length }) + cat.image * 2 : 0;
   const apiCostInr = cat ? Math.round(credits / cat.markup) : 0;
   const priceNum = Math.max(0, Math.round(Number(price) || 0));
+  const advanceNum = advance === null ? Math.ceil(priceNum / 2) : Math.min(priceNum, Math.max(0, Math.round(Number(advance) || 0)));
+  const advanced = priceNum > 0 && advanceNum >= Math.ceil(priceNum / 2);
   const profit = priceNum - apiCostInr;
   const storyCost = cat ? planCost(cat, length) : 0;
   const valid = customer.trim().length >= 2 && phone.replace(/\D/g, '').length >= 10 && business.trim().length >= 2 && offer.trim().length >= 3;
 
   async function create() {
-    if (!(await confirmSpend({ action: 'Start this ad', credits: storyCost, balance, detail: 'Maya writes the ad script and shot list now. You approve frames and pay for video step by step.' }))) return;
+    if (advanced && !(await confirmSpend({ action: 'Start this ad', credits: storyCost, balance, detail: 'Maya writes the ad script and shot list now. You approve frames and pay for video step by step.' }))) return;
     setBusy(true);
     try {
       const photoUrl = photo ? (await api.uploadPhoto(photo.uri, photo.mimeType)).url : undefined;
@@ -72,11 +75,14 @@ export default function NewOrder() {
         contact_line: contact.trim() || undefined,
         photo_url: photoUrl,
         price_inr: priceNum,
+        advance_inr: advanceNum,
         target_duration_sec: length,
         tier,
       });
-      await api.plan(project.id);
-      await api.updateOrder(order.id, { status: 'producing' });
+      if (advanced) {
+        await api.plan(project.id);
+        await api.updateOrder(order.id, { status: 'producing' });
+      }
       router.replace({ pathname: '/order/[id]', params: { id: order.id } });
     } catch (e) {
       showError(e);
@@ -135,7 +141,14 @@ export default function NewOrder() {
       </View>
 
       <SectionLabel>Price to customer</SectionLabel>
-      <Field label="₹" value={price} onChangeText={(t) => setPrice(t.replace(/\D/g, ''))} keyboardType="number-pad" />
+      <Field label="Price ₹" value={price} onChangeText={(t) => setPrice(t.replace(/\D/g, ''))} keyboardType="number-pad" />
+      <Field
+        label="Advance received ₹"
+        value={String(advanceNum)}
+        onChangeText={(t) => setAdvance(t.replace(/\D/g, ''))}
+        keyboardType="number-pad"
+        hint={`At least ₹${Math.ceil(priceNum / 2)} (50%) before work starts. Enter 0 if not received yet — the order waits.`}
+      />
       <Card>
         <Text style={type.small}>Your API cost, including a few re-takes and the poster</Text>
         <Text style={[type.title, { color: colors.text }]}>≈ ₹{apiCostInr.toLocaleString('en-IN')}</Text>
@@ -145,7 +158,15 @@ export default function NewOrder() {
         <Text style={[type.small, { marginTop: 4 }]}>Uses about {credits.toLocaleString('en-IN')} of your credits.</Text>
       </Card>
 
-      <Button title="Start the ad" cost={storyCost} onPress={create} loading={busy} disabled={!valid || !cat} style={{ marginTop: space(2) }} />
+      <Button
+        title={advanced ? 'Start the ad' : 'Save order · wait for advance'}
+        kind={advanced ? 'primary' : 'secondary'}
+        cost={advanced ? storyCost : undefined}
+        onPress={create}
+        loading={busy}
+        disabled={!valid || !cat || priceNum < 1}
+        style={{ marginTop: space(2) }}
+      />
     </Screen>
   );
 }

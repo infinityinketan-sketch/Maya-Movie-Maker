@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { balanceOf, db, getOwnedCharacter, getOwnedProject, getOwnedShot, must, type AdOrder, type Project, type Shot } from './db';
 import { HttpError, type AppUser, type Env, type JobMessage } from './env';
-import { AD_LENGTHS, adIdea, BUSINESS_TYPES, OCCASIONS, waLink, waMessage, type AdBrief } from './ads';
+import { AD_LENGTHS, adIdea, BUSINESS_TYPES, minAdvance, OCCASIONS, waLink, waMessage, type AdBrief } from './ads';
 import { CAMERA_LIBRARY, directCostUsd, directorPrices, directShot, reviewCostUsd, reviewFilm, type ShotContext } from './director';
 import { assertCanAfford, chargeJob, failJob, startJob, succeedJob } from './jobs';
 import { verifyFalWebhook, type FalWebhook } from './providers/fal';
@@ -179,6 +179,7 @@ app.post('/v1/projects/:id/plan', async (c) => {
   const d = db(c.env);
   const p = await getOwnedProject(d, user.id, c.req.param('id'));
   if (p.status === 'planning') throw new HttpError(409, 'busy', 'The story is already being written.');
+  if (p.kind === 'ad') await requireAdvance(d, p.id);
   const cfg = priceConfig(c.env);
   const cost = planCostUsd(p.target_duration_sec);
   const job = await startJob(c.env, d, {
@@ -522,6 +523,8 @@ app.post('/v1/orders', async (c) => {
     photoUrl,
   };
   const target = AD_LENGTHS.includes(Number(b.target_duration_sec)) ? Number(b.target_duration_sec) : 20;
+  const price = Math.max(1, Math.round(Number(b.price_inr) || 499));
+  const advance = Math.min(price, Math.max(0, Math.round(Number(b.advance_inr) || 0)));
   const tier = (TIERS as string[]).includes(b.tier as string) ? (b.tier as Tier) : 'budget';
   const project = must(
     await d
@@ -559,7 +562,10 @@ app.post('/v1/orders', async (c) => {
         language: brief.language,
         contact_line: brief.contactLine,
         photo_url: brief.photoUrl,
-        price_inr: Math.max(0, Math.round(Number(b.price_inr) || 499)),
+        price_inr: price,
+        advance_inr: advance,
+        advance_at: advance > 0 ? new Date().toISOString() : null,
+        status: advance >= minAdvance(price) ? 'new' : 'awaiting_advance',
         notes: optText(b.notes, 1000) ?? null,
       })
       .select('*')
@@ -569,7 +575,15 @@ app.post('/v1/orders', async (c) => {
   return c.json({ order, project }, 201);
 });
 
-const ORDER_STATUSES = ['new', 'producing', 'ready', 'delivered', 'paid', 'cancelled'];
+const ORDER_STATUSES = ['awaiting_advance', 'new', 'producing', 'ready', 'delivered', 'paid', 'cancelled'];
+
+/** No work (and no API spend) on an ad until at least half its price is received. */
+async function requireAdvance(d: ReturnType<typeof db>, projectId: string): Promise<void> {
+  const o = (await d.from('ad_orders').select('price_inr,advance_inr').eq('project_id', projectId).maybeSingle()).data as Pick<AdOrder, 'price_inr' | 'advance_inr'> | null;
+  if (o && o.advance_inr < minAdvance(o.price_inr)) {
+    throw new HttpError(402, 'advance_required', `Collect at least ₹${minAdvance(o.price_inr) - o.advance_inr} more advance before starting this ad.`);
+  }
+}
 
 app.patch('/v1/orders/:id', async (c) => {
   const user = c.get('user');
@@ -577,10 +591,21 @@ app.patch('/v1/orders/:id', async (c) => {
   await requireOperator(d, user.id);
   const cur = must(await d.from('ad_orders').select('*').eq('id', c.req.param('id')).eq('user_id', user.id).maybeSingle(), 'order') as AdOrder;
   const b = await body(c);
-  const status = ORDER_STATUSES.includes(b.status as string) ? (b.status as string) : undefined;
+  let status = ORDER_STATUSES.includes(b.status as string) ? (b.status as string) : undefined;
+  const price = b.price_inr !== undefined ? Math.max(1, Math.round(Number(b.price_inr) || 0)) : cur.price_inr;
+  const advance = b.advance_inr !== undefined ? Math.min(price, Math.max(0, Math.round(Number(b.advance_inr) || 0))) : cur.advance_inr;
+  const advanced = advance >= minAdvance(price);
+  const target = status ?? cur.status;
+  if (!advanced && ['new', 'producing', 'ready', 'delivered'].includes(target)) {
+    if (status) throw new HttpError(402, 'advance_required', `Record at least ₹${minAdvance(price)} advance first.`);
+    status = 'awaiting_advance';
+  }
+  if (advanced && target === 'awaiting_advance') status = 'new';
   const patch = clean({
     status,
-    price_inr: b.price_inr !== undefined ? Math.max(0, Math.round(Number(b.price_inr) || 0)) : undefined,
+    price_inr: b.price_inr !== undefined ? price : undefined,
+    advance_inr: b.advance_inr !== undefined ? advance : undefined,
+    advance_at: b.advance_inr !== undefined && advance > cur.advance_inr ? new Date().toISOString() : undefined,
     notes: optText(b.notes, 1000),
     delivered_at: status === 'delivered' && !cur.delivered_at ? new Date().toISOString() : undefined,
     paid_at: status === 'paid' && !cur.paid_at ? new Date().toISOString() : undefined,
@@ -601,6 +626,7 @@ app.get('/v1/orders/:id/whatsapp', async (c) => {
     videoUrl: p?.final_video_url ?? null,
     posterUrl: p?.poster_url ?? null,
     priceInr: o.price_inr,
+    advanceInr: o.advance_inr,
     paid: o.status === 'paid',
   });
   return c.json({ link: waLink(o.customer_phone, message), message });

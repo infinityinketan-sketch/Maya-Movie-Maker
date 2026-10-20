@@ -41,7 +41,7 @@ export interface AdBrief {
   photoUrl: string | null;
 }
 
-export type OrderStatus = 'new' | 'producing' | 'ready' | 'delivered' | 'paid' | 'cancelled';
+export type OrderStatus = 'awaiting_advance' | 'new' | 'producing' | 'ready' | 'delivered' | 'paid' | 'cancelled';
 export interface AdOrder {
   id: string;
   project_id: string | null;
@@ -56,6 +56,8 @@ export interface AdOrder {
   contact_line: string | null;
   photo_url: string | null;
   price_inr: number;
+  advance_inr: number;
+  advance_at: string | null;
   status: OrderStatus;
   notes: string | null;
   delivered_at: string | null;

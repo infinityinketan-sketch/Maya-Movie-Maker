@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adIdea, adPlanPrompt, posterPrompt, scriptFor, waLink, waMessage, type AdBrief } from '../src/ads';
+import { adIdea, adPlanPrompt, balanceDue, minAdvance, posterPrompt, scriptFor, waLink, waMessage, type AdBrief } from '../src/ads';
 import { planPrompt } from '../src/providers/anthropic';
 
 const brief: AdBrief = {
@@ -41,12 +41,17 @@ describe('shop ads', () => {
   });
 
   it('builds a WhatsApp link with the Indian country code', () => {
-    const msg = waMessage({ customerName: 'Sunil', businessName: 'Sunil Sweets', videoUrl: 'https://v', posterUrl: null, priceInr: 499, paid: false });
+    const msg = waMessage({ customerName: 'Sunil', businessName: 'Sunil Sweets', videoUrl: 'https://v', posterUrl: null, priceInr: 499, advanceInr: 250, paid: false });
     expect(msg).toContain('Reel: https://v');
-    expect(msg).toContain('₹499');
+    expect(msg).toContain('Balance: ₹249');
+    const ask = waMessage({ customerName: 'Sunil', businessName: 'Sunil Sweets', videoUrl: null, posterUrl: null, priceInr: 999, advanceInr: 0, paid: false });
+    expect(ask).toContain('send ₹500 advance');
+    expect(ask).not.toContain('Reel:');
     expect(waLink('98765 43210', 'hi')).toBe('https://wa.me/919876543210?text=hi');
     expect(waLink('+91 98765 43210', 'hi')).toBe('https://wa.me/919876543210?text=hi');
     expect(waLink('09876543210', 'hi')).toBe('https://wa.me/919876543210?text=hi');
-    expect(waMessage({ customerName: 'S', businessName: 'B', videoUrl: null, posterUrl: null, priceInr: 499, paid: true })).not.toContain('₹');
+    expect(waMessage({ customerName: 'S', businessName: 'B', videoUrl: null, posterUrl: null, priceInr: 499, advanceInr: 250, paid: true })).not.toContain('₹');
+    expect(minAdvance(499)).toBe(250);
+    expect(balanceDue({ priceInr: 999, advanceInr: 500, paid: false })).toBe(499);
   });
 });

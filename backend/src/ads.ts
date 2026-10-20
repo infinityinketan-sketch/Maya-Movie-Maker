@@ -73,11 +73,35 @@ export function posterPrompt(b: AdBrief): string {
     .join('\n');
 }
 
-export function waMessage(o: { customerName: string; businessName: string; videoUrl: string | null; posterUrl: string | null; priceInr: number; paid: boolean }): string {
-  const lines = [`Namaskar ${o.customerName} ji 🙏`, `Your ${o.businessName} ad is ready.`];
-  if (o.videoUrl) lines.push(`Reel: ${o.videoUrl}`);
-  if (o.posterUrl) lines.push(`Poster: ${o.posterUrl}`);
-  if (!o.paid) lines.push(`Amount: ₹${o.priceInr} (UPI)`);
+/** Half the price, rounded up: the minimum advance before any work starts. */
+export function minAdvance(priceInr: number): number {
+  return Math.ceil(priceInr / 2);
+}
+
+export function balanceDue(o: { priceInr: number; advanceInr: number; paid: boolean }): number {
+  return o.paid ? 0 : Math.max(0, o.priceInr - o.advanceInr);
+}
+
+export function waMessage(o: {
+  customerName: string;
+  businessName: string;
+  videoUrl: string | null;
+  posterUrl: string | null;
+  priceInr: number;
+  advanceInr: number;
+  paid: boolean;
+}): string {
+  const lines = [`Namaskar ${o.customerName} ji 🙏`];
+  const need = minAdvance(o.priceInr) - o.advanceInr;
+  if (need > 0 && !o.paid) {
+    lines.push(`Your ${o.businessName} ad: total ₹${o.priceInr}.`, `Please send ₹${need} advance by UPI to start. We deliver in 24 hours after the advance.`);
+  } else {
+    lines.push(`Your ${o.businessName} ad is ready.`);
+    if (o.videoUrl) lines.push(`Reel: ${o.videoUrl}`);
+    if (o.posterUrl) lines.push(`Poster: ${o.posterUrl}`);
+    const due = balanceDue(o);
+    if (due > 0) lines.push(`Balance: ₹${due} (UPI)`);
+  }
   lines.push('Thank you!');
   return lines.join('\n');
 }

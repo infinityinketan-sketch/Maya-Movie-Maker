@@ -14,7 +14,7 @@ From zero to the app running on your phone, then on the Play Store. Do the steps
 ## 1. Supabase (database + login) — free while building, $25/month in production
 
 1. Create a project at supabase.com (region: Mumbai `ap-south-1`).
-2. **Database:** open *SQL Editor*, paste and run each file in `supabase/migrations/` in name order (`…0001_init.sql`, `…0002_director.sql`, `…0003_shop_ads.sql`). (Or with the CLI: `supabase link` then `supabase db push`.)
+2. **Database:** open *SQL Editor*, paste and run each file in `supabase/migrations/` in name order (`…0001_init.sql`, `…0002_director.sql`, `…0003_shop_ads.sql`, `…0004_order_advance.sql`). (Or with the CLI: `supabase link` then `supabase db push`.)
 3. **Login by email code:** *Authentication → Sign In / Providers → Email*: enable Email, keep "Confirm email" on.
    *Authentication → Emails → Templates → Magic Link*: replace the body so it shows the code, e.g.
    `<h2>Your Maya login code</h2><p style="font-size:28px"><b>{{ .Token }}</b></p>`

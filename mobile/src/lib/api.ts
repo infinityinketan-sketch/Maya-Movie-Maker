@@ -99,11 +99,12 @@ export const api = {
     contact_line?: string;
     photo_url?: string;
     price_inr: number;
+    advance_inr: number;
     target_duration_sec: number;
     tier: Tier;
     notes?: string;
   }) => call<{ order: AdOrder; project: Project }>('POST', '/v1/orders', input),
-  updateOrder: (id: string, patch: { status?: OrderStatus; price_inr?: number; notes?: string }) => call<AdOrder>('PATCH', `/v1/orders/${id}`, patch),
+  updateOrder: (id: string, patch: { status?: OrderStatus; price_inr?: number; advance_inr?: number; notes?: string }) => call<AdOrder>('PATCH', `/v1/orders/${id}`, patch),
   orderWhatsapp: (id: string) => call<{ link: string; message: string }>('GET', `/v1/orders/${id}/whatsapp`),
   poster: (projectId: string) => call('POST', `/v1/projects/${projectId}/poster`),
   uploadPhoto,

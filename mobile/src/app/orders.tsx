@@ -2,15 +2,15 @@ import { router } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useOrders } from '../lib/hooks';
-import { ORDER_STATUS } from '../lib/orders';
+import { balance, ORDER_STATUS, received } from '../lib/orders';
 import type { AdOrder } from '../lib/types';
 import { Button, Empty } from '../ui/kit';
 import { colors, radius, space, type } from '../ui/theme';
 
 function totals(orders: AdOrder[]) {
-  const paid = orders.filter((o) => o.status === 'paid').reduce((s, o) => s + o.price_inr, 0);
-  const due = orders.filter((o) => o.status === 'delivered').reduce((s, o) => s + o.price_inr, 0);
-  const open = orders.filter((o) => ['new', 'producing', 'ready'].includes(o.status)).length;
+  const paid = orders.reduce((s, o) => s + received(o), 0);
+  const due = orders.reduce((s, o) => s + balance(o), 0);
+  const open = orders.filter((o) => ['awaiting_advance', 'new', 'producing', 'ready'].includes(o.status)).length;
   return { paid, due, open };
 }
 
@@ -27,7 +27,7 @@ export default function Orders() {
         ListHeaderComponent={
           orders && orders.length ? (
             <View style={st.stats}>
-              <Stat label="Earned" value={`₹${t.paid.toLocaleString('en-IN')}`} color={colors.good} />
+              <Stat label="Received" value={`₹${t.paid.toLocaleString('en-IN')}`} color={colors.good} />
               <Stat label="To collect" value={`₹${t.due.toLocaleString('en-IN')}`} color={colors.warn} />
               <Stat label="In progress" value={String(t.open)} color={colors.accent} />
             </View>

@@ -8,9 +8,9 @@ import type { OrderStatus } from '../../lib/types';
 import { Button, Card, Chip, Field, Screen, SectionLabel, showError, StatusPill } from '../../ui/kit';
 import { Player, shareImage, shareVideo } from '../../ui/media';
 import { colors, radius, space, type } from '../../ui/theme';
-import { ORDER_STATUS } from '../../lib/orders';
+import { balance, minAdvance, ORDER_STATUS } from '../../lib/orders';
 
-const FLOW: OrderStatus[] = ['new', 'producing', 'ready', 'delivered', 'paid'];
+const FLOW: OrderStatus[] = ['awaiting_advance', 'new', 'producing', 'ready', 'delivered', 'paid'];
 
 export default function OrderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -18,6 +18,7 @@ export default function OrderScreen() {
   const { project, shots } = useProject(order?.project_id ?? undefined);
   const [busy, setBusy] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
+  const [adv, setAdv] = useState('');
 
   if (!order) {
     return (
@@ -69,6 +70,58 @@ export default function OrderScreen() {
         <Text style={[type.small, { marginTop: space(1) }]}>
           {order.customer_name} · {order.customer_phone} · ₹{order.price_inr}
         </Text>
+      </Card>
+
+      <SectionLabel>Payment</SectionLabel>
+      <Card>
+        <Text style={type.body}>
+          Received ₹{order.status === 'paid' ? order.price_inr : order.advance_inr} of ₹{order.price_inr}
+          {balance(order) > 0 ? ` · balance ₹${balance(order)}` : ''}
+        </Text>
+        {order.advance_inr < minAdvance(order.price_inr) && order.status !== 'cancelled' ? (
+          <Text style={[type.small, { color: colors.danger, marginTop: 4 }]}>Work starts after at least ₹{minAdvance(order.price_inr)} advance.</Text>
+        ) : null}
+        {order.status !== 'paid' && order.status !== 'cancelled' ? (
+          <View style={{ flexDirection: 'row', gap: space(1), marginTop: space(1.5), alignItems: 'flex-start' }}>
+            <View style={{ flex: 1 }}>
+              <Field label="Total received so far ₹" value={adv} onChangeText={(t) => setAdv(t.replace(/\D/g, ''))} keyboardType="number-pad" placeholder={String(order.advance_inr || minAdvance(order.price_inr))} />
+            </View>
+            <Button
+              title="Save"
+              kind="secondary"
+              style={{ marginTop: 22 }}
+              disabled={!adv}
+              loading={busy === 'adv'}
+              onPress={() =>
+                run('adv', async () => {
+                  await api.updateOrder(order.id, { advance_inr: Number(adv) });
+                  setAdv('');
+                })
+              }
+            />
+          </View>
+        ) : null}
+        {order.advance_inr < minAdvance(order.price_inr) && order.status !== 'cancelled' ? (
+          <Button
+            title="Ask for advance on WhatsApp"
+            kind="ghost"
+            loading={busy === 'askadv'}
+            onPress={() => run('askadv', async () => Linking.openURL((await api.orderWhatsapp(order.id)).link))}
+          />
+        ) : null}
+        {order.advance_inr >= minAdvance(order.price_inr) && project && shots.length === 0 && project.status !== 'planning' ? (
+          <Button
+            title="Start production"
+            style={{ marginTop: space(1) }}
+            loading={busy === 'start'}
+            onPress={() =>
+              run('start', async () => {
+                await api.plan(project.id);
+                await api.updateOrder(order.id, { status: 'producing' });
+              })
+            }
+          />
+        ) : null}
       </Card>
 
       <SectionLabel>Status</SectionLabel>
@@ -125,7 +178,7 @@ export default function OrderScreen() {
       <Button title="Message customer on WhatsApp" disabled={!videoReady && !posterReady} loading={busy === 'wa'} onPress={() => run('wa', sendWhatsApp)} />
       <Text style={[type.small, { marginTop: 6 }]}>Opens their chat with the Reel and poster links and the amount due. Send the files too for the best quality on Status.</Text>
       {order.status !== 'paid' ? (
-        <Button title={`Mark ₹${order.price_inr} as paid`} kind="secondary" style={{ marginTop: space(1.5) }} loading={busy === 'paid'} onPress={() => setStatus('paid')} />
+        <Button title={`Mark fully paid (balance ₹${balance(order)})`} kind="secondary" style={{ marginTop: space(1.5) }} loading={busy === 'paid'} onPress={() => setStatus('paid')} />
       ) : (
         <Text style={[type.small, { marginTop: space(1.5), color: colors.good }]}>Paid {order.paid_at ? new Date(order.paid_at).toLocaleDateString('en-IN') : ''}</Text>
       )}
