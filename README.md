@@ -9,7 +9,7 @@ Type an idea, get a finished short film. Maya writes the story, designs the char
 | 1 Story | Idea → title, characters, scenes, shot list with dialogue (films up to 5 minutes) | Claude Sonnet 5.5 | 11–55 per story (15 s–5 min film) |
 | 2 Cast | One reference look per character, reused in every shot | Nano Banana 2.1 (Gemini) | 14 per character |
 | 3 Storyboard | One still frame per shot; you approve before any video is paid for | Nano Banana 2.1 | 14 per frame |
-| 4 Film | Each approved frame becomes a 4/6/8 s clip with native dialogue and sound | Veo 3.1 Lite / Fast / Pro via fal.ai | 53–845 per shot |
+| 4 Film | Each approved frame becomes a 4/6/8 s clip with native dialogue and sound | Draft: Veo 3.1 Lite 720p · HD Value: LTX-2 1080p · Standard: Veo 3.1 Fast · Premium: Veo 3.1 (all via fal.ai) | 53–845 per shot (6 s shot: 80 / 96 / 238 / 634) |
 | Music | One instrumental score, looped under the film | Lyria 2 via fal.ai | 27 |
 | Final cut | Shots joined in order with the score | fal.ai FFmpeg compose | 4 per minute |
 

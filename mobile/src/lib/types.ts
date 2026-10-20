@@ -1,4 +1,4 @@
-export type Tier = 'budget' | 'standard' | 'premium';
+export type Tier = 'budget' | 'value' | 'standard' | 'premium';
 export type GenStatus = 'none' | 'queued' | 'running' | 'done' | 'failed';
 
 export interface Project {
@@ -100,6 +100,9 @@ export interface Shot {
   approved: boolean;
   video_url: string | null;
   video_status: GenStatus;
+  video_model: string | null;
+  prev_video_url: string | null;
+  prev_video_model: string | null;
   takes: number;
   error: string | null;
 }
@@ -168,3 +171,6 @@ export interface FilmReview {
   notes: ReviewNote[];
   credits: number;
 }
+
+export const TIER_NAMES: Record<Tier, string> = { budget: 'Draft', value: 'HD Value', standard: 'Standard', premium: 'Premium' };
+export const TIER_ORDER: Tier[] = ['budget', 'value', 'standard', 'premium'];

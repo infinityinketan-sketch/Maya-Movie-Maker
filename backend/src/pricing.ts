@@ -3,21 +3,51 @@
 // Unit prices are fal.ai / Gemini / Anthropic list prices read in October 2026.
 // Change them here when a provider changes its price; the app reads them via /v1/catalog.
 
-export type Tier = 'budget' | 'standard' | 'premium';
-export const TIERS: Tier[] = ['budget', 'standard', 'premium'];
+export type Tier = 'budget' | 'value' | 'standard' | 'premium';
+export const TIERS: Tier[] = ['budget', 'value', 'standard', 'premium'];
+
+export interface VideoInputArgs {
+  prompt: string;
+  imageUrl: string;
+  seconds: number; // a length this model supports
+  aspectRatio: '16:9' | '9:16';
+}
 
 export interface VideoModel {
   endpoint: string;
-  resolution: '720p' | '1080p';
-  usdPerSec: number; // with native audio
   label: string;
+  usdPerSec: number; // with native audio
+  durations: number[]; // clip lengths the model can make, ascending
+  input: (a: VideoInputArgs) => Record<string, unknown>;
 }
 
+const veo = (endpoint: string, resolution: '720p' | '1080p', usdPerSec: number, label: string): VideoModel => ({
+  endpoint,
+  label,
+  usdPerSec,
+  durations: [4, 6, 8],
+  input: (a) => ({ prompt: a.prompt, image_url: a.imageUrl, duration: `${a.seconds}s`, resolution, aspect_ratio: a.aspectRatio, generate_audio: true }),
+});
+
 export const VIDEO_MODELS: Record<Tier, VideoModel> = {
-  budget: { endpoint: 'fal-ai/veo3.1/lite/image-to-video', resolution: '720p', usdPerSec: 0.05, label: 'Veo 3.1 Lite · 720p' },
-  standard: { endpoint: 'fal-ai/veo3.1/fast/image-to-video', resolution: '1080p', usdPerSec: 0.15, label: 'Veo 3.1 Fast · 1080p' },
-  premium: { endpoint: 'fal-ai/veo3.1/image-to-video', resolution: '1080p', usdPerSec: 0.4, label: 'Veo 3.1 · 1080p' },
+  budget: veo('fal-ai/veo3.1/lite/image-to-video', '720p', 0.05, 'Veo 3.1 Lite · 720p'),
+  // LTX-2 makes 6/8/10 s clips at $0.06/s with sound; the frame shape follows the storyboard image.
+  value: {
+    endpoint: 'fal-ai/ltx-2/image-to-video',
+    label: 'LTX-2 · 1080p',
+    usdPerSec: 0.06,
+    durations: [6, 8, 10],
+    input: (a) => ({ prompt: a.prompt, image_url: a.imageUrl, duration: a.seconds, resolution: '1080p', fps: 25, generate_audio: true }),
+  },
+  standard: veo('fal-ai/veo3.1/fast/image-to-video', '1080p', 0.15, 'Veo 3.1 Fast · 1080p'),
+  premium: veo('fal-ai/veo3.1/image-to-video', '1080p', 0.4, 'Veo 3.1 · 1080p'),
 };
+
+/** Seconds actually generated (and paid for) for a shot: the shortest clip the model makes that covers it. The final cut trims to the shot length. */
+export function billedSeconds(tier: Tier, shotSec: number): number {
+  const d = VIDEO_MODELS[tier].durations;
+  return d.find((x) => x >= shotSec) ?? d[d.length - 1];
+}
 
 export const UNIT_USD = {
   llmInputPerMTok: 2, // Claude Sonnet 5.5
@@ -64,8 +94,8 @@ export function planCostUsd(targetSec: number): number {
 export function imageCostUsd(): number {
   return UNIT_USD.image2k;
 }
-export function videoCostUsd(tier: Tier, seconds: number): number {
-  return VIDEO_MODELS[tier].usdPerSec * seconds;
+export function videoCostUsd(tier: Tier, shotSec: number): number {
+  return VIDEO_MODELS[tier].usdPerSec * billedSeconds(tier, shotSec);
 }
 export function musicCostUsd(): number {
   return UNIT_USD.musicPer30s; // one ~30 s track, looped under the film

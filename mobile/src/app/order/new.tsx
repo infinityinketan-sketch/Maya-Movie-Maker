@@ -136,6 +136,7 @@ export default function NewOrder() {
       </View>
       <View style={[st.wrap, { marginTop: space(1) }]}>
         <Chip label="Draft 720p" selected={tier === 'budget'} onPress={() => setTier('budget')} />
+        <Chip label="HD Value 1080p" selected={tier === 'value'} onPress={() => setTier('value')} />
         <Chip label="Standard 1080p" selected={tier === 'standard'} onPress={() => setTier('standard')} />
         <Chip label="Premium" selected={tier === 'premium'} onPress={() => setTier('premium')} />
       </View>

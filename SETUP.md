@@ -14,7 +14,7 @@ From zero to the app running on your phone, then on the Play Store. Do the steps
 ## 1. Supabase (database + login) — free while building, $25/month in production
 
 1. Create a project at supabase.com (region: Mumbai `ap-south-1`).
-2. **Database:** open *SQL Editor*, paste and run each file in `supabase/migrations/` in name order (`…0001_init.sql`, `…0002_director.sql`, `…0003_shop_ads.sql`, `…0004_order_advance.sql`). (Or with the CLI: `supabase link` then `supabase db push`.)
+2. **Database:** open *SQL Editor*, paste and run each file in `supabase/migrations/` in name order (`…0001_init.sql`, `…0002_director.sql`, `…0003_shop_ads.sql`, `…0004_order_advance.sql`, `…0005_video_value_tier.sql`). (Or with the CLI: `supabase link` then `supabase db push`.)
 3. **Login by email code:** *Authentication → Sign In / Providers → Email*: enable Email, keep "Confirm email" on.
    *Authentication → Emails → Templates → Magic Link*: replace the body so it shows the code, e.g.
    `<h2>Your Maya login code</h2><p style="font-size:28px"><b>{{ .Token }}</b></p>`
@@ -135,7 +135,8 @@ These depend on provider behaviour that can only be confirmed with real keys:
 
 1. **Final cut audio.** The final cut uses fal.ai's FFmpeg compose with the shot videos as one track and the music as another. Confirm the shots' own dialogue/sound is kept in the output. If it is dropped, tell me and I'll switch the cut to a small FFmpeg render service.
 2. **Gemini image model id.** `GEMINI_IMAGE_MODEL` defaults to `gemini-nano-banana-2.1`. If storyboard frames fail with "model not found", set it to `gemini-3.1-flash-image` in `wrangler.toml`.
-3. **Dialogue language.** Veo speaks Hindi and other Indian languages unevenly; try a Hindi and an English shot before promising languages in the store listing.
+3. **HD Value vs Standard.** Film the same 3 shots on HD Value (LTX-2, $0.06/s) and Standard (Veo 3.1 Fast, $0.15/s): switch the film's quality and re-take — each shot screen shows the new and previous take together. If LTX-2 keeps faces, frames and Marathi/Hindi dialogue well enough, use it as your default HD.
+4. **Dialogue language.** Veo speaks Hindi and other Indian languages unevenly; try a Hindi and an English shot before promising languages in the store listing.
 
 ## Changing prices
 

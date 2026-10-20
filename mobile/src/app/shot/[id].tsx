@@ -103,8 +103,17 @@ function ShotEditor({
 
       {shot.video_url ? (
         <>
-          <SectionLabel right={<StatusPill status={shot.video_status} label={shot.video_status === 'done' ? `Take ${shot.takes}` : undefined} />}>Video</SectionLabel>
+          <SectionLabel right={<StatusPill status={shot.video_status} label={shot.video_status === 'done' ? `Take ${shot.takes}` : undefined} />}>
+            {shot.video_model ? `Video · ${shot.video_model}` : 'Video'}
+          </SectionLabel>
           <Player uri={shot.video_url} ratio={ratio} />
+        </>
+      ) : null}
+      {shot.prev_video_url ? (
+        <>
+          <SectionLabel>{shot.prev_video_model ? `Previous take · ${shot.prev_video_model}` : 'Previous take'}</SectionLabel>
+          <Player uri={shot.prev_video_url} ratio={ratio} />
+          <Text style={[type.small, { marginTop: 6 }]}>Compare the two. The final cut uses the newest take.</Text>
         </>
       ) : null}
 

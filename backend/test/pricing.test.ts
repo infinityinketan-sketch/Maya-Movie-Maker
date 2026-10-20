@@ -70,3 +70,22 @@ describe('render pricing', () => {
     expect(renderCredits(61, cfg)).toBe(perMinute * 2);
   });
 });
+
+describe('video models', () => {
+  it('HD Value (LTX-2) bills its shortest clip that covers the shot and is cheaper than Standard', async () => {
+    const { billedSeconds, VIDEO_MODELS } = await import('../src/pricing');
+    expect(billedSeconds('value', 4)).toBe(6);
+    expect(billedSeconds('value', 8)).toBe(8);
+    expect(billedSeconds('standard', 4)).toBe(4);
+    for (const d of [4, 6, 8]) expect(videoCostUsd('value', d)).toBeLessThan(videoCostUsd('standard', d));
+    expect(VIDEO_MODELS.value.input({ prompt: 'p', imageUrl: 'u', seconds: 6, aspectRatio: '9:16' })).toEqual({
+      prompt: 'p',
+      image_url: 'u',
+      duration: 6,
+      resolution: '1080p',
+      fps: 25,
+      generate_audio: true,
+    });
+    expect(VIDEO_MODELS.standard.input({ prompt: 'p', imageUrl: 'u', seconds: 8, aspectRatio: '16:9' })).toMatchObject({ duration: '8s', aspect_ratio: '16:9' });
+  });
+});

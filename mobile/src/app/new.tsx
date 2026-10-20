@@ -14,7 +14,8 @@ const LENGTHS = [15, 30, 60, 120, 180, 300];
 const STYLES = ['Cinematic live action', 'Bollywood glossy', 'Gritty handheld', 'Pixar-style 3D animation', 'Anime', 'Watercolour', 'Vintage 70s film'];
 const TIERS: { id: Tier; name: string; note: string }[] = [
   { id: 'budget', name: 'Draft', note: '720p · cheapest' },
-  { id: 'standard', name: 'Standard', note: '1080p · best value' },
+  { id: 'value', name: 'HD Value', note: '1080p · LTX-2, new' },
+  { id: 'standard', name: 'Standard', note: '1080p · Veo Fast' },
   { id: 'premium', name: 'Premium', note: '1080p · top quality' },
 ];
 
@@ -95,9 +96,9 @@ export default function NewFilm() {
       </View>
 
       <SectionLabel>Video quality</SectionLabel>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {TIERS.map((t) => (
-          <Card key={t.id} onPress={() => setTier(t.id)} style={[{ flex: 1, padding: space(1.5) }, tier === t.id && { borderColor: colors.accent, backgroundColor: colors.accentSoft }]}>
+          <Card key={t.id} onPress={() => setTier(t.id)} style={[{ width: '48%', padding: space(1.5) }, tier === t.id && { borderColor: colors.accent, backgroundColor: colors.accentSoft }]}>
             <Text style={[type.heading, { fontSize: 15 }, tier === t.id && { color: colors.accent }]}>{t.name}</Text>
             <Text style={[type.small, { fontSize: 12 }]}>{t.note}</Text>
             {cat ? <Text style={[type.small, { fontSize: 12, marginTop: 4 }]}>{cat.tiers[t.id].videoPerShot['6']} cr / 6s shot</Text> : null}

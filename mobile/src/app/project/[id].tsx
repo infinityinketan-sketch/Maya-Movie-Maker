@@ -5,7 +5,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View 
 import { api } from '../../lib/api';
 import { framesNeeded, planCost, portraitsNeeded, videoCost, videosNeeded } from '../../lib/cost';
 import { useCatalog, useDirectorAccess, useProject, useWallet } from '../../lib/hooks';
-import type { Catalog, Character, FilmReview, Project, ReviewNote, Scene, Shot } from '../../lib/types';
+import { TIER_NAMES, TIER_ORDER, type Catalog, type Character, type FilmReview, type Project, type ReviewNote, type Scene, type Shot } from '../../lib/types';
 import { DirectorLocked, ReviewView } from '../../ui/director';
 import { Button, Card, Chip, confirmSpend, Empty, Field, Screen, SectionLabel, showError, StatusPill } from '../../ui/kit';
 import { aspectOf, Player, saveImageToPhone, saveVideoToPhone, shareImage, shareVideo } from '../../ui/media';
@@ -593,17 +593,17 @@ function FilmStep({ project, shots, cat, balance }: Ctx) {
       ) : null}
 
       <SectionLabel>Quality</SectionLabel>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        {(['budget', 'standard', 'premium'] as const).map((t) => (
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {TIER_ORDER.map((t) => (
           <Chip
             key={t}
-            label={`${t === 'budget' ? 'Draft' : t === 'standard' ? 'Standard' : 'Premium'} · ${cat.tiers[t].videoPerShot['6']} cr`}
+            label={`${TIER_NAMES[t]} · ${cat.tiers[t].videoPerShot['6']} cr`}
             selected={project.tier === t}
             onPress={() => api.updateProject(project.id, { tier: t }).catch(showError)}
           />
         ))}
       </View>
-      <Text style={[type.small, { marginTop: 6 }]}>Price per 6-second shot. Changes apply to shots you film next.</Text>
+      <Text style={[type.small, { marginTop: 6 }]}>Price per 6-second shot. Changes apply to shots you film next. To compare two models, switch quality and re-take a shot — the shot screen keeps the previous take next to the new one.</Text>
     </View>
   );
 }

@@ -7,7 +7,7 @@ import { planFilm } from './providers/anthropic';
 import { falSubmit, resultUrl } from './providers/fal';
 import { generateImage, type InlineImage } from './providers/gemini';
 import { posterPrompt } from './ads';
-import { MUSIC_MODEL, RENDER_MODEL, VIDEO_MODELS } from './pricing';
+import { billedSeconds, MUSIC_MODEL, RENDER_MODEL, VIDEO_MODELS, type Tier } from './pricing';
 import { copyFromUrl, fromBase64, mediaKey, putBytes, readAsBase64 } from './storage';
 
 export async function handleQueue(batch: MessageBatch<JobMessage>, env: Env): Promise<void> {
@@ -258,15 +258,13 @@ async function submitVideo(env: Env, d: Db, job: Job): Promise<void> {
     const sp = await d.from('characters').select('voice').eq('project_id', p.id).ilike('name', shot.speaker).maybeSingle();
     voice = (sp.data?.voice as string | undefined) ?? null;
   }
-  const model = VIDEO_MODELS[(job.input.tier as keyof typeof VIDEO_MODELS) ?? p.tier];
-  const requestId = await falSubmit(env, model.endpoint, {
-    prompt: videoPrompt(p, shot, voice),
-    image_url: shot.keyframe_url,
-    duration: `${shot.duration_sec}s`,
-    resolution: model.resolution,
-    aspect_ratio: p.aspect_ratio,
-    generate_audio: true,
-  });
+  const tier = (job.input.tier as Tier) ?? p.tier;
+  const model = VIDEO_MODELS[tier];
+  const requestId = await falSubmit(
+    env,
+    model.endpoint,
+    model.input({ prompt: videoPrompt(p, shot, voice), imageUrl: shot.keyframe_url, seconds: billedSeconds(tier, shot.duration_sec), aspectRatio: p.aspect_ratio }),
+  );
   await update(d, 'jobs', job.id, { provider_request_id: requestId });
 }
 
@@ -323,8 +321,21 @@ async function finalizeJob(env: Env, d: Db, msg: Extract<JobMessage, { type: 'fi
 
   if (job.kind === 'video') {
     const url = await copyFromUrl(env, out.url, mediaKey(p.user_id, p.id, 'video', job.target_id!, 'mp4'), 'video/mp4');
-    const shot = must(await d.from('shots').select('takes').eq('id', job.target_id!).maybeSingle(), 'shot') as { takes: number };
-    await markTarget(d, job, 'done', undefined, { video_url: url, takes: shot.takes + 1, error: null });
+    const shot = must(await d.from('shots').select('takes,video_url,video_model').eq('id', job.target_id!).maybeSingle(), 'shot') as {
+      takes: number;
+      video_url: string | null;
+      video_model: string | null;
+    };
+    const label = VIDEO_MODELS[(job.input.tier as Tier) ?? p.tier]?.label ?? job.model;
+    // Keep the previous take so two models can be compared side by side.
+    await markTarget(d, job, 'done', undefined, {
+      video_url: url,
+      video_model: label,
+      prev_video_url: shot.video_url,
+      prev_video_model: shot.video_url ? shot.video_model : null,
+      takes: shot.takes + 1,
+      error: null,
+    });
     await succeedJob(d, job.id, { url });
   } else if (job.kind === 'music') {
     const url = await copyFromUrl(env, out.url, mediaKey(p.user_id, p.id, 'music', p.id, 'wav'), 'audio/wav');
