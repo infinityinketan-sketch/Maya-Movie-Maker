@@ -10,7 +10,7 @@ import { colors, space, type } from '../ui/theme';
 
 const GENRES = ['Drama', 'Comedy', 'Thriller', 'Romance', 'Sci-fi', 'Fantasy', 'Horror', 'Documentary', 'Ad / promo', 'Kids'];
 const LANGUAGES = ['English', 'Hindi', 'Marathi', 'Tamil', 'Telugu', 'Bengali', 'Gujarati', 'Kannada', 'Malayalam', 'Punjabi'];
-const LENGTHS = [15, 30, 60, 120];
+const LENGTHS = [15, 30, 60, 120, 180, 300];
 const STYLES = ['Cinematic live action', 'Bollywood glossy', 'Gritty handheld', 'Pixar-style 3D animation', 'Anime', 'Watercolour', 'Vintage 70s film'];
 const TIERS: { id: Tier; name: string; note: string }[] = [
   { id: 'budget', name: 'Draft', note: '720p · cheapest' },
@@ -82,7 +82,7 @@ export default function NewFilm() {
       </View>
 
       <SectionLabel>Length</SectionLabel>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {LENGTHS.map((l) => (
           <Chip key={l} label={l < 60 ? `${l} sec` : `${l / 60} min`} selected={length === l} onPress={() => setLength(l)} />
         ))}
@@ -109,7 +109,7 @@ export default function NewFilm() {
         <Text style={type.small}>Writing the story now costs</Text>
         <Text style={[type.title, { color: colors.accent }]}>{storyCost || '…'} credits</Text>
         <Text style={[type.small, { marginTop: space(1) }]}>
-          The whole film usually takes about {estimate ? estimate.toLocaleString('en-IN') : '…'} credits (₹1 each), including a few re-takes. You approve and pay step by step — nothing is filmed until you say so.
+          {length >= 180 ? 'Long films have more shots, so faces and clothes can drift between scenes — create character looks first and check every frame. ' : ''}The whole film usually takes about {estimate ? estimate.toLocaleString('en-IN') : '…'} credits (₹1 each), including a few re-takes. You approve and pay step by step — nothing is filmed until you say so.
         </Text>
       </Card>
 

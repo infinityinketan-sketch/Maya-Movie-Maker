@@ -54,7 +54,7 @@ export function shotsFor(targetSec: number): number {
 
 /** Output-token budget for a film plan; we charge for the full budget so a long answer can't lose money. */
 export function planMaxTokens(targetSec: number): number {
-  return Math.min(16000, 2500 + 350 * shotsFor(targetSec));
+  return Math.min(24000, 2500 + 350 * shotsFor(targetSec));
 }
 const PLAN_INPUT_TOKENS = 3000;
 
@@ -126,7 +126,7 @@ export function catalog(cfg: PriceConfig) {
     markup: cfg.markup,
     image: creditsFor(imageCostUsd(), cfg),
     music: creditsFor(musicCostUsd(), cfg),
-    planPerDuration: Object.fromEntries([15, 20, 30, 60, 120, 300].map((s) => [s, creditsFor(planCostUsd(s), cfg)])),
+    planPerDuration: Object.fromEntries([15, 20, 30, 60, 120, 180, 300].map((s) => [s, creditsFor(planCostUsd(s), cfg)])),
     renderPerMinute: creditsFor(renderCostUsd(60), cfg),
     tiers: perTier,
     packs: CREDIT_PACKS,

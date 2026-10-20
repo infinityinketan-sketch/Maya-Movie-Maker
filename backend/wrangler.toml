@@ -8,7 +8,7 @@ ANTHROPIC_MODEL = "claude-sonnet-5-5"
 GEMINI_IMAGE_MODEL = "gemini-nano-banana-2.1"
 USD_INR = "88"
 CREDIT_MARKUP = "3"
-DAILY_CREDIT_LIMIT = "20000"
+DAILY_CREDIT_LIMIT = "50000"
 GOOGLE_PLAY_PACKAGE = "com.maya.moviemaker"
 # Set after deploy: your worker URL and the public URL of the R2 bucket
 PUBLIC_API_BASE = "https://maya-api.YOUR-SUBDOMAIN.workers.dev"

@@ -6,6 +6,7 @@ import {
   imageCostUsd,
   packWorstCaseProfitInr,
   planCostUsd,
+  planMaxTokens,
   priceConfig,
   snapDuration,
   TIERS,
@@ -44,6 +45,8 @@ describe('credit pricing', () => {
     expect(planCostUsd(30)).toBeGreaterThan(0);
     expect(planCostUsd(300)).toBeGreaterThan(planCostUsd(30));
     expect(creditsFor(planCostUsd(60), cfg)).toBeLessThan(40);
+    // a 5-minute film (~50 shots) gets enough output tokens for every shot
+    expect(planMaxTokens(300)).toBeGreaterThanOrEqual(2500 + 350 * 50);
   });
 
   it('catalog lists every tier and duration', () => {

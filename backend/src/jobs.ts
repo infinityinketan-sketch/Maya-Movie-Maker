@@ -15,7 +15,7 @@ export interface NewJob {
 
 /** Credits a user may spend per rolling 24 h — stops runaway spend from a stolen account or a bug. */
 async function assertDailyLimit(env: Env, d: Db, userId: string, extra: number): Promise<void> {
-  const limit = Number(env.DAILY_CREDIT_LIMIT || 20000);
+  const limit = Number(env.DAILY_CREDIT_LIMIT || 50000);
   const since = new Date(Date.now() - 24 * 3600_000).toISOString();
   const res = await d.from('credit_ledger').select('delta').eq('user_id', userId).eq('kind', 'charge').gte('created_at', since);
   if (res.error) throw new Error(res.error.message);

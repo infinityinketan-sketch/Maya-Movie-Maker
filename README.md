@@ -6,7 +6,7 @@ Type an idea, get a finished short film. Maya writes the story, designs the char
 
 | Step | What happens | Model | Credits (default prices) |
 |---|---|---|---|
-| 1 Story | Idea → title, characters, scenes, shot list with dialogue | Claude Sonnet 5.5 | 11–27 per story (15 s–2 min film) |
+| 1 Story | Idea → title, characters, scenes, shot list with dialogue (films up to 5 minutes) | Claude Sonnet 5.5 | 11–56 per story (15 s–5 min film) |
 | 2 Cast | One reference look per character, reused in every shot | Nano Banana 2.1 (Gemini) | 14 per character |
 | 3 Storyboard | One still frame per shot; you approve before any video is paid for | Nano Banana 2.1 | 14 per frame |
 | 4 Film | Each approved frame becomes a 4/6/8 s clip with native dialogue and sound | Veo 3.1 Lite / Fast / Pro via fal.ai | 53–845 per shot |
