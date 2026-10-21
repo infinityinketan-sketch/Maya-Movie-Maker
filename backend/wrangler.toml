@@ -33,7 +33,8 @@ max_batch_timeout = 2
 max_retries = 0
 
 [triggers]
-crons = ["*/30 * * * *"]
+# every 30 min: stuck jobs, expiry, refunds · 02:15 IST daily: storage clean-up
+crons = ["*/30 * * * *", "45 20 * * *"]
 
 [observability]
 enabled = true

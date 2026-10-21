@@ -146,7 +146,9 @@ export function normalizeEdit(raw: unknown, media: MediaItem[]): Edit {
 
   const audio: EditAudio[] = [];
   for (const a of r.audio as Record<string, unknown>[]) {
-    const m = typeof a?.url === 'string' ? byUrl.get(a.url) : undefined;
+    let m = typeof a?.url === 'string' ? byUrl.get(a.url) : undefined;
+    // A re-composed score replaces the old one: keep the music layer on the new score.
+    if (!m && a?.kind === 'music') m = media.find((x) => x.audioKind === 'music');
     if (!m || m.type !== 'audio') continue;
     const len = m.seconds;
     const inn = num(a.in, 0, Math.max(0, len - 0.2), 0);

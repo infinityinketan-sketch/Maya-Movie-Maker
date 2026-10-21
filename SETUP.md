@@ -59,6 +59,7 @@ npx wrangler queues create maya-jobs
 4. Deploy: `npx wrangler deploy`. It prints the Worker URL, e.g. `https://maya-api.<you>.workers.dev`.
 5. Put that URL in `PUBLIC_API_BASE` in `wrangler.toml` (fal.ai sends results to `<url>/v1/webhooks/fal`) and deploy again.
 6. Check: open `<worker url>/v1/catalog` — you should see the credit prices.
+7. Two schedules come with the deploy (`wrangler.toml`): every 30 minutes (stuck jobs, credit expiry, Play refunds) and nightly at 02:15 IST (storage clean-up). The clean-up's summary appears in the Worker logs as `daily cleanup {…}`.
 
 The Workers Paid plan ($5/month) is needed for Queues.
 

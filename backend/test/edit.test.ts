@@ -62,6 +62,11 @@ describe('editor', () => {
     expect(e.clips.map((c) => c.url)).toEqual(['https://m/s1-newer.mp4', 'https://m/s1-new.mp4']);
   });
 
+  it('a music layer moves to the new score when the music is re-composed', () => {
+    const e = normalizeEdit({ clips: [], audio: [{ kind: 'music', url: 'https://m/old-music.wav', start: 0, volume: 0.2, loop: true }] }, media);
+    expect(e.audio).toEqual([expect.objectContaining({ url: 'https://m/music.wav', volume: 0.2, loop: true })]);
+  });
+
   it('rejects edits that are too long or malformed', () => {
     const many = Array.from({ length: 80 }, () => ({ url: 'https://m/shop.mp4', in: 0, out: 12.5 }));
     expect(() => normalizeEdit({ clips: many, audio: [] }, media)).toThrow(/at most 10 minutes/);

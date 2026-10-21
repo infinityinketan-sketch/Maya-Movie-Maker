@@ -37,6 +37,9 @@ import {
 } from './pricing';
 import { deletePrefix, keyFromUrl, mediaKey, putBytes } from './storage';
 import { handleCron, handleQueue } from './worker';
+import { dailyCleanup } from './cleanup';
+
+const DAILY_CRON = '45 20 * * *'; // must match wrangler.toml
 
 type App = { Bindings: Env; Variables: { user: AppUser } };
 const app = new Hono<App>();
@@ -1007,7 +1010,8 @@ app.post('/v1/billing/google-play/verify', async (c) => {
 export default {
   fetch: app.fetch,
   queue: handleQueue,
-  scheduled: (_e: ScheduledController, env: Env, ctx: ExecutionContext) => ctx.waitUntil(handleCron(env)),
+  scheduled: (e: ScheduledController, env: Env, ctx: ExecutionContext) =>
+    ctx.waitUntil(e.cron === DAILY_CRON ? dailyCleanup(env, db(env)).then(() => undefined) : handleCron(env)),
 } satisfies ExportedHandler<Env, JobMessage>;
 
 export { app };

@@ -77,6 +77,7 @@ App ──▶ Worker API ──▶ charge credits ──▶ Queue ──▶ Clau
 ```
 
 - The app only **reads** its own rows from Supabase (row-level security). Everything that costs money goes through the Worker, which charges credits *before* calling a provider and refunds on any failure.
+- **Storage clean-up (nightly, 02:15 IST):** files nothing uses any more are deleted after a day — older takes, redrawn frames, re-made music, posters and cuts, results that failed their checks. A shot's previous take is let go after 60 days without changes (unless your edit uses it); the newest take, the final film and everything in your edit are always kept. Films whose story was never written are deleted after 30 days; anything paid for, and shop-ad projects, are never deleted automatically.
 - Idle cost is about $31/month (Supabase Pro + Workers Paid + domain). Everything else is pay-per-use; the mixing server scales to zero and its free tier covers about 25 hours of rendering a month.
 
 ## Commands
