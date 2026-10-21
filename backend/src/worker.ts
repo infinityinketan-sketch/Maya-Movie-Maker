@@ -201,7 +201,7 @@ async function runPlan(env: Env, d: Db, job: Job): Promise<void> {
       'scene',
     ) as { id: string };
     const rows = sc.shots.map((sh) => {
-      const names = new Set([...(sh.characters ?? []), ...(sh.speaker ? [sh.speaker] : [])].map((n) => n.toLowerCase()));
+      const names = shotCast(sh);
       return {
         project_id: p.id,
         scene_id: scene.id,
@@ -212,7 +212,7 @@ async function runPlan(env: Env, d: Db, job: Job): Promise<void> {
         action: sh.action,
         dialogue: sh.dialogue ?? null,
         speaker: sh.speaker ?? null,
-        character_ids: [...names].map((n) => idByName.get(n)).filter(Boolean),
+        character_ids: names.map((n) => idByName.get(n)).filter(Boolean),
       };
     });
     must(await d.from('shots').insert(rows).select('id'), 'shots');
@@ -301,25 +301,33 @@ export interface CastMember {
 }
 
 /**
- * Video models don't know character names, so every person in the shot is identified by how they look.
- * Dialogue shots say exactly who speaks and that everyone else stays silent; silent shots say no one speaks,
- * otherwise the model invents speech and can give it to the wrong face.
+ * Lessons from real shoots, applied to every video prompt:
+ * - Video models don't know character names, so each person is identified by how they look.
+ * - The spoken line comes FIRST, with an exact voice (age and tone) and lips in sync; models weight the start of a prompt most.
+ * - The voices of the film's other characters are named as voices NOT to use; otherwise a father's deep voice
+ *   can come out of his son's mouth even when the father isn't in the shot.
+ * - Everyone else in the shot is told to stay silent, and nobody is speaking off camera.
+ * - Silent shots say no one speaks, otherwise the model invents speech.
  */
 export function videoPrompt(
   p: Pick<Project, 'language' | 'style'>,
   shot: Pick<Shot, 'camera' | 'action' | 'dialogue' | 'speaker'>,
   cast: CastMember[] = [],
+  filmCast: CastMember[] = [],
 ): string {
   const who = (c: CastMember) => `${c.name} (${c.description.trim().replace(/\.$/, '')})`;
+  const same = (a: CastMember, b: CastMember) => a.name.toLowerCase() === b.name.toLowerCase();
   const parts: string[] = [];
   if (shot.dialogue) {
-    const sp = shot.speaker ? cast.find((c) => c.name.toLowerCase() === shot.speaker!.toLowerCase()) : undefined;
+    const sp = shot.speaker ? [...cast, ...filmCast].find((c) => c.name.toLowerCase() === shot.speaker!.toLowerCase()) : undefined;
     const speaker = sp ? who(sp) : shot.speaker || 'the character';
-    const voice = sp?.voice ? ` (voice: ${sp.voice})` : '';
-    parts.push(`Only ${speaker} speaks${voice}, in ${p.language}: "${shot.dialogue}".`);
-    const silent = cast.filter((c) => c !== sp);
-    for (const c of silent) parts.push(`${who(c)} stays silent and does not speak.`);
-    parts.push('No other voice is heard.');
+    parts.push(`${speaker} says in ${p.language}: "${shot.dialogue}"`);
+    if (sp?.voice) parts.push(`The voice is ${sp.voice}.`);
+    const avoid = [...new Set(filmCast.filter((c) => !sp || !same(c, sp)).map((c) => c.voice?.trim()).filter((v): v is string => !!v && v !== sp?.voice))];
+    if (avoid.length) parts.push(`Do not use these other voices from the film: ${avoid.join('; ')}.`);
+    parts.push('The lips move clearly in sync with every word.');
+    for (const c of cast.filter((c) => !sp || !same(c, sp))) parts.push(`${who(c)} stays silent and does not speak.`);
+    parts.push(`${sp ? sp.name : 'The speaker'} is the only voice heard; no one is speaking off camera.`);
   } else {
     parts.push('No one on screen speaks; no dialogue or voices.');
   }
@@ -329,21 +337,28 @@ export function videoPrompt(
   return parts.filter(Boolean).join(' ');
 }
 
+/**
+ * Who appears in a shot's storyboard frame. A shot with a line shows ONLY its speaker: a second face in a talking
+ * shot is how the wrong person ends up speaking. Listeners get their own silent reaction shot.
+ */
+export function shotCast(sh: { characters?: string[]; dialogue?: string | null; speaker?: string | null }): string[] {
+  if (sh.dialogue && sh.speaker) return [sh.speaker.toLowerCase()];
+  return [...new Set([...(sh.characters ?? []), ...(sh.speaker ? [sh.speaker] : [])].map((n) => n.toLowerCase()))];
+}
+
 async function submitVideo(env: Env, d: Db, job: Job): Promise<void> {
   const shot = must(await d.from('shots').select('*').eq('id', job.target_id!).maybeSingle(), 'shot') as Shot;
   const p = await loadProject(d, shot.project_id);
   if (!shot.keyframe_url) throw new Error('shot has no approved storyboard frame');
-  let cast: CastMember[] = [];
-  if (shot.character_ids?.length) {
-    const rows = await d.from('characters').select('name, description, voice, idx').in('id', shot.character_ids).order('idx');
-    cast = (rows.data ?? []) as CastMember[];
-  }
+  const all = await d.from('characters').select('id, name, description, voice, idx').eq('project_id', p.id).order('idx');
+  const filmCast = (all.data ?? []) as (CastMember & { id: string })[];
+  const cast = filmCast.filter((c) => shot.character_ids?.includes(c.id));
   const tier = (job.input.tier as Tier) ?? p.tier;
   const model = VIDEO_MODELS[tier];
   const sub = await falSubmit(
     env,
     model.endpoint,
-    model.input({ prompt: videoPrompt(p, shot, cast), imageUrl: shot.keyframe_url, seconds: billedSeconds(tier, shot.duration_sec), aspectRatio: p.aspect_ratio }),
+    model.input({ prompt: videoPrompt(p, shot, cast, filmCast), imageUrl: shot.keyframe_url, seconds: billedSeconds(tier, shot.duration_sec), aspectRatio: p.aspect_ratio }),
   );
   await saveSubmission(d, job.id, sub);
 }

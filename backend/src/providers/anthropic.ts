@@ -50,7 +50,7 @@ const PLAN_TOOL = {
           properties: {
             name: { type: 'string' },
             description: { type: 'string', description: 'Fixed visual description reused in every shot: age, build, face, hair, skin tone, clothing with colours. 40-70 words.' },
-            voice: { type: 'string', description: 'How the voice sounds, e.g. "warm low female voice, Indian English accent"' },
+            voice: { type: 'string', description: 'How the voice sounds, with age, pitch and tone, clearly different from every other character, e.g. "warm, low female voice of a woman about 40, Indian English accent"' },
           },
         },
       },
@@ -113,7 +113,14 @@ export const DIRECTOR_RULES = `Film-craft rules you always follow:
 - Every camera move must be motivated by the story (follow action, reveal, build tension). Static frames are allowed and often stronger.
 - Light sets the mood: golden hour = warmth and hope, blue hour = melancholy, hard side light = drama, neon = night city energy, soft window light = intimacy.
 - Lens choice: 24mm wide for space and energy, 35-50mm natural, 85mm portrait for faces with soft background, macro for tiny details.
-- AI video limits: each shot is a separate 4-8 second clip made from one still frame, so use ONE clear camera movement per shot, simple actions, no hard cuts inside a shot, no on-screen text, and describe the exact frame (who, where, light) at the start.`;
+- AI video limits: each shot is a separate 4-8 second clip made from one still frame, so use ONE clear camera movement per shot, simple actions, no hard cuts inside a shot, no on-screen text, and describe the exact frame (who, where, light) at the start.
+Dialogue rules for AI video (the model often gives a line to the wrong face or the wrong voice, so these are strict):
+- A shot with dialogue shows ONLY its speaker, facing the camera with the mouth clearly visible. List only the speaker in that shot's characters. Never put a second character in a talking shot; show listeners in their own silent reaction shot.
+- The speaker never talks "to someone off camera". Frame them alone; they speak toward the camera or into the distance.
+- One speaker and one short line per shot, about 2.5 words per second at most.
+- Avoid words in the line that name another character who could be pictured instead (e.g. "Father, ..."); let the next shot show who is addressed.
+- Give every character a clearly different voice (age, pitch, tone), e.g. "deep, slow, aged male voice" vs "light, soft, youthful male voice".
+- Never let a face disappear and come back within one shot (bowing and rising, turning away and back, walking behind something): end the shot while the face is hidden and start the next with it visible. The model invents a new face otherwise.`;
 
 export async function callClaudeTool<T>(
   env: Env,

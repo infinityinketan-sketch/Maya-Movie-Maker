@@ -78,6 +78,24 @@ Identity drift is **not** a provider failure, so it does not trigger an automati
 
 **Open decision for Ketan:** should high-risk shots that the user *did not* override and that still drift get a partial credit back? The ×3 markup can absorb it, but it is a cost at zero margin for that shot. Default in this spec: no.
 
+## 5b. Dialogue and voices (learned in testing, Oct 2026)
+
+What went wrong in test shoots with Veo 3.1's built-in speech:
+- A father spoke his son's line in a shot that also showed the father.
+- With only the son in the frame, the line still came out in the father's deep voice.
+- The same character got a different voice in different shots.
+
+Rules now built in (`DIRECTOR_RULES`, `videoPrompt`, `shotCast`, Director's review):
+1. **A talking shot shows only its speaker,** facing the camera with the mouth visible. Listeners get their own silent reaction shot. The planner enforces this: a shot with a line keeps only the speaker in its cast.
+2. **No speaking "to someone off camera".** The speaker faces the camera or looks into the distance.
+3. **The line goes first in the video prompt,** with the speaker identified by appearance, their exact voice (age, pitch, tone), and lips in sync.
+4. **The film's other voices are named as voices not to use,** even when those characters aren't in the shot.
+5. **Everyone else in the shot is told to stay silent,** and silent shots say no one speaks.
+6. **Every character gets a clearly different voice** in the story plan.
+7. **The line avoids naming another character who could be pictured instead** ("Father, …").
+
+Known limit: these rules make the right voice much more likely but cannot guarantee it, and the built-in speech does not keep one voice per character across shots. The guaranteed fix, if retakes stay costly: generate video without speech, make each line with a fixed text-to-speech voice per character (each character already has a `voice` field), and lip-sync it on fal.ai. Not built yet; decide after measuring the retake rate.
+
 ## 6. Build order
 
 1. Risk rules in the story writer and Director's review prompts (prompt-only change, no schema).

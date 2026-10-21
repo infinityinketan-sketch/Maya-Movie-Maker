@@ -255,7 +255,7 @@ export function reviewPrompt(film: ShotContext['film'], scenes: { heading: strin
     }
   }
   out.push(
-    '\nReview it like a director before the shoot: establishing shots, variety of shot sizes, angles that match the emotion, screen direction, dialogue coverage, pacing, a strong opening frame and a memorable last shot, and anything an AI video model will struggle with (several movements in one shot, crowds of moving people, readable text). Give concrete fixes.',
+    '\nReview it like a director before the shoot: establishing shots, variety of shot sizes, angles that match the emotion, screen direction, dialogue coverage, pacing, a strong opening frame and a memorable last shot, and anything an AI video model will struggle with (several movements in one shot, crowds of moving people, readable text, a face that disappears and comes back within a shot). Check every dialogue shot strictly: it must show ONLY its speaker facing the camera, never a second character and never a line spoken "to someone off camera"; flag any talking shot that breaks this and split it into a speaker shot and a silent reaction shot. Give concrete fixes.',
   );
   return out.filter(Boolean).join('\n');
 }
