@@ -39,11 +39,33 @@ describe('plan normalisation', () => {
 });
 
 describe('video + render', () => {
-  it('puts dialogue, speaker and language in the video prompt', () => {
-    const p = videoPrompt({ language: 'Hindi', style: null }, { camera: 'close-up', action: 'Asha smiles', dialogue: 'Chalo!', speaker: 'Asha' }, 'warm voice');
-    expect(p).toContain('Asha says in Hindi: "Chalo!"');
-    expect(p).toContain('warm voice');
+  const asha = { name: 'Asha', description: 'young woman in a yellow saree, long braid', voice: 'warm female voice' };
+  const ravi = { name: 'Ravi', description: 'older man with a grey moustache, white kurta', voice: 'deep male voice' };
+
+  it('names the speaker by appearance, with voice and language', () => {
+    const p = videoPrompt({ language: 'Hindi', style: null }, { camera: 'close-up', action: 'Asha smiles', dialogue: 'Chalo!', speaker: 'Asha' }, [asha]);
+    expect(p).toContain('Only Asha (young woman in a yellow saree, long braid) speaks (voice: warm female voice), in Hindi: "Chalo!"');
+    expect(p).toContain('No other voice is heard');
     expect(p).toContain('No background music');
+  });
+
+  it('keeps every other character in the shot silent', () => {
+    const p = videoPrompt({ language: 'Hindi', style: null }, { camera: 'two-shot', action: 'They sit on the veranda', dialogue: 'Suno.', speaker: 'Ravi' }, [asha, ravi]);
+    expect(p).toContain('Only Ravi (older man with a grey moustache, white kurta) speaks (voice: deep male voice)');
+    expect(p).toContain('Asha (young woman in a yellow saree, long braid) stays silent and does not speak.');
+    expect(p).not.toContain('Ravi (older man with a grey moustache, white kurta) stays silent');
+  });
+
+  it('tells the model no one speaks in a silent shot', () => {
+    const p = videoPrompt({ language: 'Hindi', style: null }, { camera: 'wide shot', action: 'A crane flies over the river', dialogue: null, speaker: null }, []);
+    expect(p.startsWith('No one on screen speaks')).toBe(true);
+    expect(p).not.toContain('says');
+  });
+
+  it('still works when the speaker is not in the cast list', () => {
+    const p = videoPrompt({ language: 'English', style: null }, { camera: null, action: 'A voice calls out', dialogue: 'Wait!', speaker: 'Guard' }, [asha]);
+    expect(p).toContain('Only Guard speaks, in English: "Wait!"');
+    expect(p).toContain('Asha (young woman in a yellow saree, long braid) stays silent');
   });
 
   it('lays shots back to back and loops music to the film length', () => {
