@@ -294,11 +294,37 @@ async function saveImage(env: Env, p: Project, kind: string, id: string, img: In
 
 // ---------------------------------------------------------------- fal.ai (async, finished by webhook)
 
-export function videoPrompt(p: Pick<Project, 'language' | 'style'>, shot: Pick<Shot, 'camera' | 'action' | 'dialogue' | 'speaker'>, voice?: string | null): string {
-  const parts = [shot.camera ? `${shot.camera}.` : '', shot.action];
+export interface CastMember {
+  name: string;
+  description: string;
+  voice: string | null;
+}
+
+/**
+ * Video models don't know character names, so every person in the shot is identified by how they look.
+ * Dialogue shots say exactly who speaks and that everyone else stays silent; silent shots say no one speaks,
+ * otherwise the model invents speech and can give it to the wrong face.
+ */
+export function videoPrompt(
+  p: Pick<Project, 'language' | 'style'>,
+  shot: Pick<Shot, 'camera' | 'action' | 'dialogue' | 'speaker'>,
+  cast: CastMember[] = [],
+): string {
+  const who = (c: CastMember) => `${c.name} (${c.description.trim().replace(/\.$/, '')})`;
+  const parts: string[] = [];
   if (shot.dialogue) {
-    parts.push(`${shot.speaker || 'The character'} says in ${p.language}: "${shot.dialogue}"${voice ? ` (voice: ${voice})` : ''}.`);
+    const sp = shot.speaker ? cast.find((c) => c.name.toLowerCase() === shot.speaker!.toLowerCase()) : undefined;
+    const speaker = sp ? who(sp) : shot.speaker || 'the character';
+    const voice = sp?.voice ? ` (voice: ${sp.voice})` : '';
+    parts.push(`Only ${speaker} speaks${voice}, in ${p.language}: "${shot.dialogue}".`);
+    const silent = cast.filter((c) => c !== sp);
+    for (const c of silent) parts.push(`${who(c)} stays silent and does not speak.`);
+    parts.push('No other voice is heard.');
+  } else {
+    parts.push('No one on screen speaks; no dialogue or voices.');
   }
+  if (shot.camera) parts.push(`${shot.camera}.`);
+  parts.push(shot.action);
   parts.push('Natural ambient sound and sound effects only. No background music, no subtitles, no on-screen text.');
   return parts.filter(Boolean).join(' ');
 }
@@ -307,17 +333,17 @@ async function submitVideo(env: Env, d: Db, job: Job): Promise<void> {
   const shot = must(await d.from('shots').select('*').eq('id', job.target_id!).maybeSingle(), 'shot') as Shot;
   const p = await loadProject(d, shot.project_id);
   if (!shot.keyframe_url) throw new Error('shot has no approved storyboard frame');
-  let voice: string | null = null;
-  if (shot.speaker) {
-    const sp = await d.from('characters').select('voice').eq('project_id', p.id).ilike('name', shot.speaker).maybeSingle();
-    voice = (sp.data?.voice as string | undefined) ?? null;
+  let cast: CastMember[] = [];
+  if (shot.character_ids?.length) {
+    const rows = await d.from('characters').select('name, description, voice, idx').in('id', shot.character_ids).order('idx');
+    cast = (rows.data ?? []) as CastMember[];
   }
   const tier = (job.input.tier as Tier) ?? p.tier;
   const model = VIDEO_MODELS[tier];
   const sub = await falSubmit(
     env,
     model.endpoint,
-    model.input({ prompt: videoPrompt(p, shot, voice), imageUrl: shot.keyframe_url, seconds: billedSeconds(tier, shot.duration_sec), aspectRatio: p.aspect_ratio }),
+    model.input({ prompt: videoPrompt(p, shot, cast), imageUrl: shot.keyframe_url, seconds: billedSeconds(tier, shot.duration_sec), aspectRatio: p.aspect_ratio }),
   );
   await saveSubmission(d, job.id, sub);
 }
