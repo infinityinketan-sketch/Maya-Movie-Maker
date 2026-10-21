@@ -15,7 +15,7 @@ From zero to the app running on your phone, then on the Play Store. Do the steps
 ## 1. Supabase (database + login) — free while building, $25/month in production
 
 1. Create a project at supabase.com (region: Mumbai `ap-south-1`).
-2. **Database:** open *SQL Editor*, paste and run each file in `supabase/migrations/` in name order (`…0001_init.sql`, `…0002_director.sql`, `…0003_shop_ads.sql`, `…0004_order_advance.sql`, `…0005_video_value_tier.sql`, `…0006_job_recovery.sql`, `…0007_editor.sql`). (Or with the CLI: `supabase link` then `supabase db push`.)
+2. **Database:** open *SQL Editor*, paste and run each file in `supabase/migrations/` in name order (`…0001_init.sql`, `…0002_director.sql`, `…0003_shop_ads.sql`, `…0004_order_advance.sql`, `…0005_video_value_tier.sql`, `…0006_job_recovery.sql`, `…0007_editor.sql`, `…0008_review_fixes.sql`). (Or with the CLI: `supabase link` then `supabase db push`.)
 3. **Login by email code:** *Authentication → Sign In / Providers → Email*: enable Email, keep "Confirm email" on.
    *Authentication → Emails → Templates → Magic Link*: replace the body so it shows the code, e.g.
    `<h2>Your Maya login code</h2><p style="font-size:28px"><b>{{ .Token }}</b></p>`
@@ -147,7 +147,8 @@ where id = (select id from auth.users where email = 'you@example.com');
    ```bash
    npx wrangler secret put GOOGLE_SERVICE_ACCOUNT_JSON   # paste the whole JSON file
    ```
-5. Add your Gmail as a *License tester* (Setup → License testing) so test purchases are free.
+5. The same service account lets the server consume each purchase after crediting it, and every 30 minutes take back credits from packs Google refunded or charged back (only credits not yet spent; the balance never goes below zero).
+6. Add your Gmail as a *License tester* (Setup → License testing) so test purchases are free.
 
 ## 6. Before you publish
 

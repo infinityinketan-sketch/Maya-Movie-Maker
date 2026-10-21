@@ -56,6 +56,8 @@ For selling done-for-you ads to local businesses over WhatsApp. Visible only to 
 - **Lost results:** if fal.ai's callback never arrives, the 30-minute check asks fal.ai directly and collects a finished result; a job still being made is left alone for up to 3 hours, then refunded.
 - **AI Director** calls retry twice within the request (1 s, 3 s) before refunding.
 
+Refunded or charged-back credit packs are detected from Google Play every 30 minutes and their unspent credits taken back.
+
 1 credit sells for ₹1. Every action costs **API price × 3** in credits (rounded up), so even a user who spends every credit through Google Play (18% GST + 15% Play fee) leaves a profit. Failed jobs refund automatically. See `backend/src/pricing.ts` and the tests in `backend/test/pricing.test.ts`.
 
 ## Repository

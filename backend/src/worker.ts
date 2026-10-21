@@ -8,6 +8,7 @@ import { planFilm } from './providers/anthropic';
 import { falLookup, falSubmit, resultUrl, type FalSubmission } from './providers/fal';
 import { generateImage, type InlineImage } from './providers/gemini';
 import { posterPrompt } from './ads';
+import { listVoidedPurchases } from './providers/googleplay';
 import { audioSeconds, editLength, falTracks, renderJobBody, type Edit } from './edit';
 import { billedSeconds, MUSIC_MODEL, RENDER_MODEL, SFX_MODEL, VIDEO_MODELS, VOICE_MODEL, type Tier } from './pricing';
 import { checkMedia, ProviderBusyError, retryDelay, type MediaExpectation } from './reliability';
@@ -137,7 +138,7 @@ async function startJobWork(env: Env, d: Db, jobId: string): Promise<void> {
       return saveSubmission(
         d,
         job.id,
-        await falSubmit(env, SFX_MODEL, { text: String(job.input.prompt), duration_seconds: Number(job.input.seconds), prompt_influence: 0.4 }),
+        await falSubmit(env, SFX_MODEL, { text: String(job.input.prompt), duration_seconds: Number(job.input.seconds), prompt_influence: 0.4 }, job.id),
       );
     case 'voice':
       return saveSubmission(
@@ -147,7 +148,7 @@ async function startJobWork(env: Env, d: Db, jobId: string): Promise<void> {
           text: String(job.input.text),
           voice: String(job.input.voice || 'Aria'),
           ...(job.input.language_code ? { language_code: String(job.input.language_code) } : {}),
-        }),
+        }, job.id),
       );
     case 'director':
       return; // handled inside the request
@@ -346,6 +347,12 @@ export function shotCast(sh: { characters?: string[]; dialogue?: string | null; 
   return [...new Set([...(sh.characters ?? []), ...(sh.speaker ? [sh.speaker] : [])].map((n) => n.toLowerCase()))];
 }
 
+/** Seconds paid for when the job was charged (the shot's length may be edited while it films). */
+function videoSeconds(job: Job, tier: Tier, shotSec: number): number {
+  const s = Number(job.input.seconds);
+  return Number.isFinite(s) && s > 0 ? s : billedSeconds(tier, shotSec);
+}
+
 async function submitVideo(env: Env, d: Db, job: Job): Promise<void> {
   const shot = must(await d.from('shots').select('*').eq('id', job.target_id!).maybeSingle(), 'shot') as Shot;
   const p = await loadProject(d, shot.project_id);
@@ -358,7 +365,8 @@ async function submitVideo(env: Env, d: Db, job: Job): Promise<void> {
   const sub = await falSubmit(
     env,
     model.endpoint,
-    model.input({ prompt: videoPrompt(p, shot, cast, filmCast), imageUrl: shot.keyframe_url, seconds: billedSeconds(tier, shot.duration_sec), aspectRatio: p.aspect_ratio }),
+    model.input({ prompt: videoPrompt(p, shot, cast, filmCast), imageUrl: shot.keyframe_url, seconds: videoSeconds(job, tier, shot.duration_sec), aspectRatio: p.aspect_ratio }),
+    job.id,
   );
   await saveSubmission(d, job.id, sub);
 }
@@ -368,7 +376,7 @@ async function submitMusic(env: Env, d: Db, job: Job): Promise<void> {
   const sub = await falSubmit(env, MUSIC_MODEL, {
     prompt: `${p.music_prompt || 'cinematic instrumental film score'}. Instrumental only, suitable as background under dialogue.`,
     negative_prompt: 'vocals, singing, lyrics, low quality',
-  });
+  }, job.id);
   await saveSubmission(d, job.id, sub);
 }
 
@@ -382,7 +390,7 @@ async function submitRender(env: Env, d: Db, job: Job): Promise<void> {
   if (!edit?.clips?.length) throw new Error('the cut has no clips');
   if (job.input.mixer) return runMixer(env, d, job, p, edit);
   const { tracks } = falTracks(edit);
-  const sub = await falSubmit(env, RENDER_MODEL, { tracks });
+  const sub = await falSubmit(env, RENDER_MODEL, { tracks }, job.id);
   await saveSubmission(d, job.id, sub);
 }
 
@@ -399,11 +407,12 @@ interface MixerResult {
 }
 
 /** Checks what the mixing server reports about the finished film. Returns a problem or null. */
-export function checkMixerResult(r: MixerResult, expectedUrl: string, expectedSec: number, aspectRatio: '16:9' | '9:16'): string | null {
+export function checkMixerResult(r: MixerResult, expectedUrl: string, expectedSec: number, aspectRatio: '16:9' | '9:16', clips = 1): string | null {
   if (r.url !== expectedUrl) return 'the film was saved in the wrong place';
   if (!(r.bytes >= 200_000)) return 'the film file is too small';
   if (!r.hasAudio) return 'the film has no sound';
-  if (Math.abs(r.seconds - expectedSec) > 2) return `the film is ${r.seconds.toFixed(1)} s long (expected ${expectedSec.toFixed(1)} s)`;
+  // Model clips are often a few hundredths short of their nominal length; allow that per clip.
+  if (r.seconds < expectedSec - 2 - 0.25 * clips || r.seconds > expectedSec + 2) return `the film is ${r.seconds.toFixed(1)} s long (expected ${expectedSec.toFixed(1)} s)`;
   if (r.height > r.width !== (aspectRatio === '9:16')) return `the film came out ${r.width}×${r.height}, not ${aspectRatio}`;
   return null;
 }
@@ -428,7 +437,7 @@ async function runMixer(env: Env, d: Db, job: Job, p: Project, edit: Edit): Prom
   const body = (await res.json().catch(() => ({}))) as Partial<MixerResult> & { message?: string };
   if (!res.ok) throw new Error(`The final cut failed: ${body.message ?? res.status}. Your credits were returned.`);
   const r = body as MixerResult;
-  const problem = checkMixerResult(r, publicUrl(env, outputKey), editLength(edit), p.aspect_ratio);
+  const problem = checkMixerResult(r, publicUrl(env, outputKey), editLength(edit), p.aspect_ratio, edit.clips.length);
   if (problem) throw new Error(`The result was unusable: ${problem}. Your credits were returned — please try again.`);
   const thumb = r.thumbnailUrl === publicUrl(env, thumbKey) ? r.thumbnailUrl : null;
   await markTarget(d, job, 'done', undefined, { final_video_url: r.url, thumbnail_url: thumb, error: null });
@@ -459,7 +468,7 @@ async function finalizeJob(env: Env, d: Db, msg: Extract<JobMessage, { type: 'fi
     const tier = (job.input.tier as Tier) ?? p.tier;
     const url = await keepChecked(env, out.url, mediaKey(p.user_id, p.id, 'video', job.target_id!, 'mp4'), 'video/mp4', {
       kind: 'video',
-      seconds: billedSeconds(tier, shot.duration_sec),
+      seconds: videoSeconds(job, tier, shot.duration_sec),
       aspectRatio: p.aspect_ratio,
       needsAudio: true,
     });
@@ -549,4 +558,21 @@ export async function handleCron(env: Env): Promise<void> {
   }
   const exp = await d.rpc('expire_all_credits');
   if (exp.error) console.error('expire credits', exp.error.message);
+  await revokeVoidedPurchases(env, d).catch((e) => console.error('voided purchases', e));
+}
+
+/**
+ * Credit packs refunded or charged back in Google Play: take back whatever credits are left from
+ * them (once per purchase). Looks back 3 days each run, so a missed run is caught up.
+ */
+export async function revokeVoidedPurchases(env: Env, d: Db): Promise<number> {
+  if (!env.GOOGLE_SERVICE_ACCOUNT_JSON) return 0;
+  const voided = await listVoidedPurchases(env, Date.now() - 3 * 24 * 3600_000);
+  let taken = 0;
+  for (const v of voided) {
+    const res = await d.rpc('revoke_purchase', { p_token: v.purchaseToken, p_reason: `Google Play refund (reason ${v.voidedReason ?? '?'})` });
+    if (res.error) console.error('revoke_purchase', v.orderId, res.error.message);
+    else taken += Number(res.data) || 0;
+  }
+  return taken;
 }

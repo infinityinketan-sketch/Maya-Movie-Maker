@@ -259,3 +259,41 @@ describe('AI sound effects and voice-overs', () => {
     expect(tables.project_assets[0].status).toBe('running');
   });
 });
+
+describe('review fixes', () => {
+  it('films the length that was paid for, even if the shot was edited meanwhile', async () => {
+    tables.jobs[0].input = { tier: 'standard', seconds: 4 };
+    tables.shots[0].duration_sec = 8; // changed after charging
+    let falBody: any;
+    vi.stubGlobal('fetch', vi.fn(async (_u: string, init: any) => {
+      falBody = JSON.parse(init.body);
+      return Response.json({ request_id: 'r', status_url: 's', response_url: 'q' });
+    }));
+    await handleQueue(batch({ type: 'start', jobId: 'j1' }).batch, env);
+    expect(falBody.duration).toBe('4s');
+  });
+
+  it('mixer length check allows model clips that are slightly short', async () => {
+    const { checkMixerResult } = await import('../src/worker');
+    const ok = { url: 'u', thumbnailUrl: null, bytes: 500_000, width: 1080, height: 1920, hasAudio: true };
+    expect(checkMixerResult({ ...ok, seconds: 296 }, 'u', 300, '9:16', 40)).toBeNull(); // 40 clips × 0.1 s short
+    expect(checkMixerResult({ ...ok, seconds: 200 }, 'u', 300, '9:16', 40)).toMatch(/200\.0 s long/);
+    expect(checkMixerResult({ ...ok, seconds: 305 }, 'u', 300, '9:16', 40)).toMatch(/long/);
+  });
+
+  it('takes back credits for refunded Google Play purchases', async () => {
+    const { revokeVoidedPurchases } = await import('../src/worker');
+    const { db } = await import('../src/db');
+    const key = (await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify'])) as CryptoKeyPair;
+    const der = new Uint8Array((await crypto.subtle.exportKey('pkcs8', key.privateKey)) as ArrayBuffer);
+    const pem = `-----BEGIN PRIVATE KEY-----\n${btoa(String.fromCharCode(...der))}\n-----END PRIVATE KEY-----`;
+    const playEnv = { ...env, GOOGLE_PLAY_PACKAGE: 'com.maya.moviemaker', GOOGLE_SERVICE_ACCOUNT_JSON: JSON.stringify({ client_email: 'sa@x.iam', private_key: pem }) };
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      if (u.includes('oauth2')) return Response.json({ access_token: 'at', expires_in: 3600 });
+      expect(u).toContain('/applications/com.maya.moviemaker/purchases/voidedpurchases?startTime=');
+      return Response.json({ voidedPurchases: [{ purchaseToken: 'tok-a', voidedReason: 7 }, { purchaseToken: 'tok-b', voidedReason: 1 }] });
+    }));
+    await revokeVoidedPurchases(playEnv, db(playEnv));
+    expect(rpcCalls.filter((c) => c.fn === 'revoke_purchase').map((c) => c.args.p_token)).toEqual(['tok-a', 'tok-b']);
+  });
+});

@@ -68,6 +68,41 @@ begin
        = (select sum(delta) from public.credit_ledger where user_id = b), 'ledger sum must equal wallet for b';
 end $$;
 
+-- Refunded / charged-back Google Play purchases take their credits back, once, never below zero
+do $$
+declare
+  c uuid := '00000000-0000-0000-0000-00000000000c';
+  bal integer;
+  took integer;
+begin
+  insert into auth.users (id, email) values (c, 'c@test.in');
+  insert into public.purchases (user_id, provider, product_id, purchase_token, credits) values (c, 'google_play', 'maya_credits_100', 'tok-void', 100);
+  perform public.grant_credits(c, 100, 'purchase', 365, 'google_play', 'tok-void', null);
+  perform public.charge_credits(c, 70, 'job', 'spent', null);
+  took := public.revoke_purchase('tok-void', 'chargeback');
+  assert took = 30, 'only the 30 credits left can be taken back, took ' || took;
+  assert public.revoke_purchase('tok-void', 'again') = 0, 'a purchase is revoked once';
+  select balance into bal from public.wallets where user_id = c;
+  assert bal = 0, 'balance must be 0, got ' || bal;
+  assert (select status from public.purchases where purchase_token = 'tok-void') = 'refunded', 'purchase marked refunded';
+  assert (select sum(delta) from public.credit_ledger where user_id = c) = bal, 'ledger matches wallet after revoke';
+  assert (select max(expires_at) from public.credit_lots where user_id = c and source = 'refund') is null, 'no refund lot here';
+
+  -- refunds of failed jobs last a year; purchase rows survive account deletion
+  delete from auth.users where id = c;
+  assert (select user_id from public.purchases where purchase_token = 'tok-void') is null, 'purchase kept without the user';
+end $$;
+
+do $$
+declare j uuid; a uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  perform public.grant_credits(a, 10, 'grant', 30, null, null, 'refund-validity');
+  insert into public.jobs (user_id, kind, credits) values (a, 'music', 10) returning id into j;
+  perform public.charge_credits(a, 10, 'job', j::text, null);
+  perform public.fail_job(j, 'x');
+  assert (select expires_at from public.credit_lots where user_id = a and source = 'refund' order by id desc limit 1) > now() + interval '360 days', 'refunds valid for a year';
+end $$;
+
 -- RLS: a signed-in user sees only their own rows and cannot write
 insert into public.projects (user_id, idea) values
   ('00000000-0000-0000-0000-00000000000a', 'idea A'),

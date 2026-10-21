@@ -7,7 +7,7 @@ import { assertCanAfford, chargeJob, failJob, startJob, succeedJob } from './job
 import { checkOwnClip, inspectMp4, ProviderBusyError, withQuickRetries } from './reliability';
 import { audioSeconds, AUDIO_TYPES, defaultEdit, editLength, isSimpleEdit, normalizeEdit, projectMedia, type Edit } from './edit';
 import { verifyFalWebhook, type FalWebhook } from './providers/fal';
-import { getProductPurchase } from './providers/googleplay';
+import { consumeProductPurchase, getProductPurchase } from './providers/googleplay';
 import {
   catalog,
   CREDIT_PACKS,
@@ -20,6 +20,7 @@ import {
   RENDER_MODEL,
   renderCostUsd,
   renderCredits,
+  billedSeconds,
   SFX_MAX_SEC,
   SFX_MODEL,
   sfxCostUsd,
@@ -61,12 +62,24 @@ app.post('/v1/webhooks/fal', async (c) => {
   const raw = await c.req.arrayBuffer();
   if (!(await verifyFalWebhook(c.req.raw.headers, raw))) return c.json({ error: 'bad_signature' }, 401);
   const hook = JSON.parse(new TextDecoder().decode(raw)) as FalWebhook;
+  if (hook.request_id !== c.req.header('x-fal-webhook-request-id')) return c.json({ error: 'bad_signature' }, 401);
   const d = db(c.env);
-  const job = await d.from('jobs').select('id').eq('provider_request_id', hook.request_id).maybeSingle();
-  if (!job.data) return c.json({ ok: true, ignored: true });
+  let jobId = ((await d.from('jobs').select('id').eq('provider_request_id', hook.request_id).maybeSingle()).data as { id: string } | null)?.id;
+  // A fast result can arrive before the worker saved the request id: match it by the job id in the URL.
+  const hinted = c.req.query('job');
+  if (!jobId && hinted && /^[0-9a-f-]{36}$/i.test(hinted)) {
+    const j = (await d.from('jobs').select('id,status,provider_request_id').eq('id', hinted).maybeSingle()).data as
+      | { id: string; status: string; provider_request_id: string | null }
+      | null;
+    if (j && !j.provider_request_id && busy(j.status)) {
+      jobId = j.id;
+      await d.from('jobs').update({ provider_request_id: hook.request_id }).eq('id', j.id);
+    }
+  }
+  if (!jobId) return c.json({ ok: true, ignored: true });
   const msg: JobMessage = {
     type: 'finalize',
-    jobId: job.data.id,
+    jobId,
     ok: hook.status === 'OK' && !hook.payload_error,
     result: hook.payload,
     error: hook.error || hook.payload_error || (hook.status === 'ERROR' ? JSON.stringify(hook.payload).slice(0, 400) : undefined),
@@ -110,6 +123,12 @@ function busy(status: string): boolean {
 }
 function clean(o: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+}
+
+/** Paid work still in progress for a film (deleting or rewriting it now would lose those credits). */
+async function busyJobs(d: ReturnType<typeof db>, projectId: string): Promise<number> {
+  const res = await d.from('jobs').select('id', { count: 'exact', head: true }).eq('project_id', projectId).in('status', ['queued', 'running']);
+  return res.count ?? 0;
 }
 
 // ---------------------------------------------------------------- account
@@ -178,6 +197,7 @@ app.delete('/v1/projects/:id', async (c) => {
   const user = c.get('user');
   const d = db(c.env);
   const p = await getOwnedProject(d, user.id, c.req.param('id'));
+  if (await busyJobs(d, p.id)) throw new HttpError(409, 'busy', 'Something is still being made for this film. Delete it once that finishes.');
   await deletePrefix(c.env, `u/${user.id}/${p.id}/`);
   await d.from('projects').delete().eq('id', p.id);
   return c.json({ ok: true });
@@ -189,6 +209,7 @@ app.post('/v1/projects/:id/plan', async (c) => {
   const d = db(c.env);
   const p = await getOwnedProject(d, user.id, c.req.param('id'));
   if (p.status === 'planning') throw new HttpError(409, 'busy', 'The story is already being written.');
+  if (await busyJobs(d, p.id)) throw new HttpError(409, 'busy', 'Frames or videos are still being made. Rewrite the story once they finish.');
   if (p.kind === 'ad') await requireAdvance(d, p.id);
   const cfg = priceConfig(c.env);
   const cost = planCostUsd(p.target_duration_sec);
@@ -221,6 +242,7 @@ async function portraitJob(c: Context<App>, characterId: string) {
   const user = c.get('user');
   const d = db(c.env);
   const ch = await getOwnedCharacter(d, user.id, characterId);
+  if (busy(ch.portrait_status)) throw new HttpError(409, 'busy', 'This look is already being drawn.');
   const cost = imageCostUsd();
   const job = await startJob(c.env, d, {
     userId: user.id,
@@ -329,7 +351,7 @@ async function videoJob(c: Context<App>, shot: Shot, tier: Tier) {
     costUsd: cost,
     provider: 'fal',
     model: VIDEO_MODELS[tier].endpoint,
-    input: { tier },
+    input: { tier, seconds: billedSeconds(tier, shot.duration_sec) },
   });
   await d.from('shots').update({ video_status: 'queued', error: null }).eq('id', shot.id);
   return job;
@@ -365,6 +387,7 @@ app.post('/v1/projects/:id/music', async (c) => {
   const user = c.get('user');
   const d = db(c.env);
   const p = await getOwnedProject(d, user.id, c.req.param('id'));
+  if (busy(p.music_status ?? '')) throw new HttpError(409, 'busy', 'The score is already being composed.');
   const cost = musicCostUsd();
   const job = await startJob(c.env, d, {
     userId: user.id,
@@ -478,6 +501,7 @@ app.post('/v1/projects/:id/assets', async (c) => {
   const d = db(c.env);
   const p = await getOwnedProject(d, user.id, c.req.param('id'));
   const type = (c.req.header('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (p.status === 'draft' || p.status === 'planning') throw new HttpError(400, 'no_story', 'Write the story first, then add your own sounds and clips.');
   const label = (c.req.query('label') || '').trim().slice(0, 60);
   const count = await d.from('project_assets').select('id', { count: 'exact', head: true }).eq('project_id', p.id);
   if ((count.count ?? 0) >= 100) throw new HttpError(400, 'too_many', 'This film already has 100 sounds and clips. Delete some first.');
@@ -775,6 +799,7 @@ app.post('/v1/shots/:id/clip', async (c) => {
 /** Photo of the customer's shop or product, used as a reference in every frame and on the poster. */
 app.post('/v1/uploads/photo', async (c) => {
   const user = c.get('user');
+  await requireOperator(db(c.env), user.id); // only the shop-ad order form uploads photos
   const type = (c.req.header('content-type') || '').split(';')[0].trim();
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) throw new HttpError(415, 'bad_type', 'Send a JPG, PNG or WebP photo.');
   const bytes = await c.req.arrayBuffer();
@@ -916,6 +941,7 @@ app.post('/v1/projects/:id/poster', async (c) => {
   const d = db(c.env);
   const p = await getOwnedProject(d, user.id, c.req.param('id'));
   if (p.kind !== 'ad') throw new HttpError(400, 'not_ad', 'Posters are made for shop ads.');
+  if (busy(p.poster_status ?? '')) throw new HttpError(409, 'busy', 'The poster is already being made.');
   const cost = imageCostUsd();
   const job = await startJob(c.env, d, {
     userId: user.id,
@@ -972,6 +998,9 @@ app.post('/v1/billing/google-play/verify', async (c) => {
     p_note: `${pack.label} pack · ${pack.credits} credits`,
   });
   if (granted.error) throw new Error(granted.error.message);
+  // Consume on the server too: if the app closes before it finishes the purchase, Google would
+  // otherwise refund it after 3 days while the credits stay granted.
+  if (purchase.consumptionState !== 1) await consumeProductPurchase(c.env, pack.productId, b.purchaseToken).catch((e: unknown) => console.error('consume failed', e));
   return c.json({ ok: true, balance: granted.data as number, credits: pack.credits });
 });
 

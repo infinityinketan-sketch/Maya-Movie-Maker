@@ -30,7 +30,8 @@ export default function Wallet() {
     handled.current.add(token);
     try {
       const res = await api.verifyPlayPurchase(purchase.productId, token);
-      await finishTransaction({ purchase, isConsumable: true });
+      // The server already consumed it; finishing here just clears it on the phone.
+      await finishTransaction({ purchase, isConsumable: true }).catch(() => undefined);
       reload();
       Alert.alert('Credits added', `${res.credits.toLocaleString('en-IN')} credits are in your account.`);
     } catch (e) {

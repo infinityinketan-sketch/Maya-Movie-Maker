@@ -40,11 +40,47 @@ async function accessToken(env: Env): Promise<string> {
 }
 
 export async function getProductPurchase(env: Env, productId: string, purchaseToken: string): Promise<PlayProductPurchase> {
-  const url = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(env.GOOGLE_PLAY_PACKAGE)}/purchases/products/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}`;
+  const url = `${playBase(env)}/products/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${await accessToken(env)}` } });
   const body = (await res.json()) as PlayProductPurchase & { error?: { message: string } };
   if (!res.ok) throw new Error(`Play verification failed (${res.status}): ${body.error?.message ?? 'unknown'}`);
   return body;
+}
+
+function playBase(env: Env): string {
+  return `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(env.GOOGLE_PLAY_PACKAGE)}/purchases`;
+}
+
+/** Marks a consumable purchase as used up so Google never auto-refunds it and the pack can be bought again. */
+export async function consumeProductPurchase(env: Env, productId: string, purchaseToken: string): Promise<void> {
+  const url = `${playBase(env)}/products/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}:consume`;
+  const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${await accessToken(env)}` } });
+  if (!res.ok) throw new Error(`Play consume failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+}
+
+export interface VoidedPurchase {
+  purchaseToken: string;
+  orderId?: string;
+  voidedTimeMillis?: string;
+  voidedReason?: number; // 0 other, 1 remorse, 2 not received, 3 defective, 4 accidental, 5 fraud, 6 friendly fraud, 7 chargeback
+  voidedSource?: number; // 0 user, 1 developer, 2 Google
+}
+
+/** Purchases refunded or charged back since `startMs` (Voided Purchases API). */
+export async function listVoidedPurchases(env: Env, startMs: number): Promise<VoidedPurchase[]> {
+  const out: VoidedPurchase[] = [];
+  let page: string | undefined;
+  for (let i = 0; i < 20; i++) {
+    const q = new URLSearchParams({ startTime: String(startMs), type: '0', maxResults: '1000' });
+    if (page) q.set('token', page);
+    const res = await fetch(`${playBase(env)}/voidedpurchases?${q}`, { headers: { Authorization: `Bearer ${await accessToken(env)}` } });
+    const body = (await res.json().catch(() => ({}))) as { voidedPurchases?: VoidedPurchase[]; tokenPagination?: { nextPageToken?: string }; error?: { message: string } };
+    if (!res.ok) throw new Error(`Play voided purchases failed (${res.status}): ${body.error?.message ?? 'unknown'}`);
+    out.push(...(body.voidedPurchases ?? []));
+    page = body.tokenPagination?.nextPageToken;
+    if (!page) break;
+  }
+  return out;
 }
 
 function b64url(bytes: Uint8Array): string {

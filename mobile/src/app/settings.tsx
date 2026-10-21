@@ -12,7 +12,7 @@ export default function Settings() {
   function deleteAccount() {
     Alert.alert(
       'Delete your account?',
-      'Your films, pictures, videos and unused credits are deleted for good. This cannot be undone.',
+      'Your films, pictures, videos and unused credits are deleted for good. Purchase receipts are kept for tax records. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {

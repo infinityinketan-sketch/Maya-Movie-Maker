@@ -8,8 +8,9 @@ export interface FalSubmission {
 }
 
 /** Submits to the fal.ai queue; the result arrives later at /v1/webhooks/fal. Busy errors are retried by the caller. */
-export async function falSubmit(env: Env, endpoint: string, input: Record<string, unknown>): Promise<FalSubmission> {
-  const webhook = `${env.PUBLIC_API_BASE.replace(/\/$/, '')}/v1/webhooks/fal`;
+export async function falSubmit(env: Env, endpoint: string, input: Record<string, unknown>, jobId: string): Promise<FalSubmission> {
+  // The job id rides along so a very fast result is matched even before the request id is saved.
+  const webhook = `${env.PUBLIC_API_BASE.replace(/\/$/, '')}/v1/webhooks/fal?job=${encodeURIComponent(jobId)}`;
   const res = await providerFetch('fal.ai', `https://queue.fal.run/${endpoint}?fal_webhook=${encodeURIComponent(webhook)}`, {
     method: 'POST',
     headers: { Authorization: `Key ${env.FAL_KEY}`, 'content-type': 'application/json' },

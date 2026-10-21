@@ -37,6 +37,8 @@ export interface Project {
   poster_url: string | null;
   edit: unknown;
   render_status?: string;
+  music_status?: string;
+  poster_status?: string;
 }
 
 export interface AdOrder {
@@ -63,6 +65,7 @@ export interface Character {
   description: string;
   voice: string | null;
   portrait_url: string | null;
+  portrait_status: string;
 }
 
 export interface Shot {
