@@ -47,6 +47,20 @@ async function uploadPhoto(uri: string, mimeType: string): Promise<{ url: string
   return { url: json.url };
 }
 
+/** Uploads a clip the user made elsewhere (e.g. Google Flow) as the shot's newest take. No credits. */
+async function uploadClip(shotId: string, uri: string, mimeType: string): Promise<Shot> {
+  const { data } = await supabase.auth.getSession();
+  const blob = await (await fetch(uri)).blob();
+  const res = await fetch(`${config.apiUrl}/v1/shots/${shotId}/clip`, {
+    method: 'POST',
+    headers: { 'content-type': mimeType || 'video/mp4', authorization: `Bearer ${data.session?.access_token ?? ''}` },
+    body: blob,
+  });
+  const json = (await res.json().catch(() => ({}))) as Shot & { error?: string; message?: string };
+  if (!res.ok) throw new ApiError(res.status, json.error ?? 'upload', json.message ?? 'Clip upload failed.');
+  return json;
+}
+
 export const api = {
   catalog: () => call<Catalog>('GET', '/v1/catalog'),
   me: () => call<{ balance: number; director: boolean; role: 'user' | 'operator' }>('GET', '/v1/me'),
@@ -108,6 +122,7 @@ export const api = {
   orderWhatsapp: (id: string) => call<{ link: string; message: string }>('GET', `/v1/orders/${id}/whatsapp`),
   poster: (projectId: string) => call('POST', `/v1/projects/${projectId}/poster`),
   uploadPhoto,
+  uploadClip,
 
   verifyPlayPurchase: (productId: string, purchaseToken: string) =>
     call<{ ok: true; balance: number; credits: number }>('POST', '/v1/billing/google-play/verify', { productId, purchaseToken }),

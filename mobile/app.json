@@ -65,7 +65,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Choose a photo of the shop or product for the ad.",
+          "photosPermission": "Choose a shop photo or one of your own video clips.",
           "cameraPermission": false,
           "microphonePermission": false
         }

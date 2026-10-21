@@ -4,7 +4,7 @@ import { HttpError, type AppUser, type Env, type JobMessage } from './env';
 import { AD_LENGTHS, adIdea, BUSINESS_TYPES, minAdvance, OCCASIONS, waLink, waMessage, type AdBrief } from './ads';
 import { CAMERA_LIBRARY, directCostUsd, directorPrices, directShot, reviewCostUsd, reviewFilm, type ShotContext } from './director';
 import { assertCanAfford, chargeJob, failJob, startJob, succeedJob } from './jobs';
-import { ProviderBusyError, withQuickRetries } from './reliability';
+import { checkOwnClip, ProviderBusyError, withQuickRetries } from './reliability';
 import { verifyFalWebhook, type FalWebhook } from './providers/fal';
 import { getProductPurchase } from './providers/googleplay';
 import {
@@ -501,6 +501,46 @@ async function requireOperator(d: ReturnType<typeof db>, userId: string): Promis
   const res = await d.from('profiles').select('role').eq('id', userId).maybeSingle();
   if (res.data?.role !== 'operator') throw new HttpError(403, 'not_operator', 'Shop-ad orders are only for the studio account.');
 }
+
+/**
+ * Your own clip for a shot (for example made in Google Flow with your own credits). No credits are
+ * charged; the clip is checked, kept as the shot's newest take, and used in the final cut.
+ */
+app.post('/v1/shots/:id/clip', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  const shot = await getOwnedShot(d, user.id, c.req.param('id'));
+  const p = await getOwnedProject(d, user.id, shot.project_id);
+  if (shot.video_status === 'queued' || shot.video_status === 'running') throw new HttpError(409, 'busy', 'This shot is being filmed right now.');
+  const type = (c.req.header('content-type') || '').split(';')[0].trim();
+  if (!['video/mp4', 'video/quicktime', 'application/octet-stream'].includes(type)) throw new HttpError(415, 'bad_type', 'Send an MP4 video.');
+  const buf = await c.req.arrayBuffer();
+  if (buf.byteLength < 50_000) throw new HttpError(400, 'too_small', 'That video file is too small.');
+  if (buf.byteLength > 90 * 1024 * 1024) throw new HttpError(413, 'too_big', 'Clips must be under 90 MB.');
+  const bytes = new Uint8Array(buf);
+  const checked = checkOwnClip(bytes, p.aspect_ratio);
+  if ('problem' in checked) throw new HttpError(400, 'bad_clip', checked.problem);
+  const url = await putBytes(c.env, mediaKey(user.id, p.id, 'video', shot.id, 'mp4'), bytes, 'video/mp4');
+  const row = must(
+    await d
+      .from('shots')
+      .update({
+        video_url: url,
+        video_model: checked.hasAudio ? 'Your clip' : 'Your clip (no sound)',
+        prev_video_url: shot.video_url,
+        prev_video_model: shot.video_url ? (shot as Shot & { video_model?: string | null }).video_model ?? null : null,
+        video_status: 'done',
+        duration_sec: checked.seconds,
+        takes: shot.takes + 1,
+        error: null,
+      })
+      .eq('id', shot.id)
+      .select('*')
+      .single(),
+    'shot',
+  );
+  return c.json(row, 201);
+});
 
 /** Photo of the customer's shop or product, used as a reference in every frame and on the poster. */
 app.post('/v1/uploads/photo', async (c) => {

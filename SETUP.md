@@ -99,6 +99,8 @@ update public.profiles set role = 'operator'
 where id = (select id from auth.users where email = 'you@example.com');
 ```
 
+**Test without paying for video:** make clips in Google Flow with your own credits, download them as MP4 (same vertical/wide shape as the film, 4–8 s), and on each shot tap *Use my own clip*. Maya then runs music and the final cut on them as usual.
+
 **First test film:** 15 seconds, Draft quality, vertical. Costs roughly 11 (story) + 14 per character + 14 per frame + 80 per shot ≈ 300 credits ≈ $1 of API spend.
 
 ## 5. Google Play (credit packs) — $25 one-time

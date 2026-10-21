@@ -117,6 +117,28 @@ export function inspectMp4(bytes: Uint8Array): Mp4Info | null {
   return info;
 }
 
+// ---------------------------------------------------------------- your own clips
+
+/** Shot length for an uploaded clip: the longest of 4/6/8 s that the clip covers (longer clips are trimmed). */
+export function shotLengthForClip(clipSec: number): 4 | 6 | 8 | null {
+  if (clipSec >= 8) return 8;
+  if (clipSec >= 6) return 6;
+  if (clipSec >= 4) return 4;
+  return null;
+}
+
+/** Checks a clip the user made elsewhere (e.g. Google Flow). Returns the problem, or the shot length to use. */
+export function checkOwnClip(bytes: Uint8Array, aspectRatio: '16:9' | '9:16'): { problem: string } | { seconds: 4 | 6 | 8; hasAudio: boolean } {
+  const info = inspectMp4(bytes);
+  if (!info || !info.hasVideo) return { problem: 'That file is not a playable MP4 video. Export or download it as MP4 and try again.' };
+  if (info.width && info.height && info.height > info.width !== (aspectRatio === '9:16')) {
+    return { problem: `The clip is ${info.width}×${info.height}, but this film is ${aspectRatio === '9:16' ? 'vertical (9:16)' : 'wide (16:9)'}. Make the clip in the same shape.` };
+  }
+  const seconds = shotLengthForClip(info.durationSec ?? 8);
+  if (!seconds) return { problem: 'The clip must be at least 4 seconds long.' };
+  return { seconds, hasAudio: info.hasAudio };
+}
+
 // ---------------------------------------------------------------- result checks
 
 export interface MediaExpectation {

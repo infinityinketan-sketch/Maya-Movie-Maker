@@ -13,6 +13,8 @@ Type an idea, get a finished short film. Maya writes the story, designs the char
 | Music | One instrumental score, looped under the film | Lyria 2 via fal.ai | 27 |
 | Final cut | Shots joined in order with the score | fal.ai FFmpeg compose | 4 per minute |
 
+**Your own clips:** any shot can use an MP4 made elsewhere — for example in Google Flow with your own credits. Tap *Use my own clip* on the shot screen; the clip is checked (playable MP4, same vertical/wide shape, at least 4 s), kept as the newest take next to the previous one, trimmed to 4/6/8 s and used in the final cut. No credits are charged.
+
 ### Director tools (paid members)
 
 Unlocked automatically by the first credit-pack purchase.

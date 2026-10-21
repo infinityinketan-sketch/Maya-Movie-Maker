@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { checkMedia, inspectMp4, providerFetch, ProviderBusyError, retryDelay, withQuickRetries } from '../src/reliability';
+import { checkMedia, checkOwnClip, inspectMp4, providerFetch, ProviderBusyError, retryDelay, shotLengthForClip, withQuickRetries } from '../src/reliability';
 
 // ---- tiny MP4 builder: just the boxes inspectMp4 reads
 function box(type: string, ...parts: Uint8Array[]): Uint8Array {
@@ -104,5 +104,15 @@ describe('busy providers', () => {
     expect(await withQuickRetries(flaky, [1, 1])).toBe('ok');
     await expect(withQuickRetries(async () => { throw new Error('bad request'); }, [1])).rejects.toThrow('bad request');
     await expect(withQuickRetries(async () => { throw new ProviderBusyError('still busy'); }, [1])).rejects.toBeInstanceOf(ProviderBusyError);
+  });
+});
+
+describe('your own clips', () => {
+  it('fits the shot length to the clip and rejects the wrong shape', () => {
+    expect([3, 4, 5.5, 6, 7.9, 8, 10].map(shotLengthForClip)).toEqual([null, 4, 4, 6, 6, 8, 8]);
+    expect(checkOwnClip(mp4({ seconds: 8, w: 1080, h: 1920, audio: true }), '9:16')).toEqual({ seconds: 8, hasAudio: true });
+    expect(checkOwnClip(mp4({ seconds: 8, w: 1920, h: 1080, audio: true }), '9:16')).toHaveProperty('problem');
+    expect(checkOwnClip(mp4({ seconds: 2, w: 1080, h: 1920, audio: true }), '9:16')).toHaveProperty('problem');
+    expect(checkOwnClip(new Uint8Array(100_000), '16:9')).toHaveProperty('problem');
   });
 });

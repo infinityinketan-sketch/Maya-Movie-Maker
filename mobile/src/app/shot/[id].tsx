@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
@@ -159,6 +160,24 @@ function ShotEditor({
           onPress={() => go('film', { action: shot.video_url ? 'Re-take this shot' : 'Film this shot', credits: tierCost }, () => api.video(shot.id))}
         />
       ) : null}
+      <Button
+        title="Use my own clip"
+        kind="ghost"
+        disabled={filming}
+        loading={busy === 'clip'}
+        style={{ marginTop: space(0.5) }}
+        onPress={() =>
+          go('clip', null, async () => {
+            const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], quality: 1, allowsEditing: false });
+            const a = res.canceled ? null : res.assets[0];
+            if (!a) return;
+            await api.uploadClip(shot.id, a.uri, a.mimeType ?? 'video/mp4');
+          })
+        }
+      />
+      <Text style={[type.small, { textAlign: 'center' }]}>
+        Made it in Google Flow or another app? Upload the MP4 (same {ratio === '9:16' ? 'vertical' : 'wide'} shape, 4–8 s). No credits used.
+      </Text>
 
       <SectionLabel>What happens</SectionLabel>
       <Field label="Action" value={action} onChangeText={setAction} multiline hint="Describe the frame: place, light, who is there, what moves." />
