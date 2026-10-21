@@ -54,8 +54,15 @@ export const UNIT_USD = {
   llmOutputPerMTok: 10,
   image2k: 0.0504, // Nano Banana 2.1, 2K
   musicPer30s: 0.1, // Lyria 2 on fal.ai
-  renderPerSec: 0.0002, // fal FFmpeg compose
+  renderPerSec: 0.0002, // fal FFmpeg compose, or our mixing server (~$0.002/film-minute on Cloud Run)
+  sfxPerSec: 0.002, // ElevenLabs sound effects v2 on fal.ai
+  voicePer1kChars: 0.1, // ElevenLabs eleven v3 TTS on fal.ai
 };
+
+export const SFX_MODEL = 'fal-ai/elevenlabs/sound-effects/v2';
+export const VOICE_MODEL = 'fal-ai/elevenlabs/tts/eleven-v3';
+export const SFX_MAX_SEC = 22;
+export const VOICE_MAX_CHARS = 1000;
 
 export const MUSIC_MODEL = 'fal-ai/lyria2';
 export const RENDER_MODEL = 'fal-ai/ffmpeg-api/compose';
@@ -109,6 +116,20 @@ export function renderCredits(seconds: number, cfg: PriceConfig): number {
   return creditsFor(renderCostUsd(60), cfg) * Math.max(1, Math.ceil(seconds / 60));
 }
 
+/** Sound effects are billed per started 5 seconds, voice-overs per started 100 characters. */
+export function sfxCostUsd(seconds: number): number {
+  return UNIT_USD.sfxPerSec * 5 * Math.max(1, Math.ceil(seconds / 5));
+}
+export function sfxCredits(seconds: number, cfg: PriceConfig): number {
+  return creditsFor(UNIT_USD.sfxPerSec * 5, cfg) * Math.max(1, Math.ceil(seconds / 5));
+}
+export function voiceCostUsd(chars: number): number {
+  return (UNIT_USD.voicePer1kChars / 10) * Math.max(1, Math.ceil(chars / 100));
+}
+export function voiceCredits(chars: number, cfg: PriceConfig): number {
+  return creditsFor(UNIT_USD.voicePer1kChars / 10, cfg) * Math.max(1, Math.ceil(chars / 100));
+}
+
 export function snapDuration(sec: number): 4 | 6 | 8 {
   if (sec <= 5) return 4;
   if (sec <= 7) return 6;
@@ -158,6 +179,8 @@ export function catalog(cfg: PriceConfig) {
     music: creditsFor(musicCostUsd(), cfg),
     planPerDuration: Object.fromEntries([15, 20, 30, 60, 120, 180, 300].map((s) => [s, creditsFor(planCostUsd(s), cfg)])),
     renderPerMinute: creditsFor(renderCostUsd(60), cfg),
+    sfxPer5Sec: creditsFor(UNIT_USD.sfxPerSec * 5, cfg),
+    voicePer100Chars: creditsFor(UNIT_USD.voicePer1kChars / 10, cfg),
     tiers: perTier,
     packs: CREDIT_PACKS,
   };

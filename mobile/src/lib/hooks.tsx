@@ -2,7 +2,7 @@ import type { Session } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { supabase } from './supabase';
-import type { AdOrder, CameraGroup, Catalog, Character, LedgerRow, Project, Scene, Shot } from './types';
+import type { AdOrder, CameraGroup, Catalog, Character, EditorOptions, EditState, LedgerRow, Project, Scene, Shot } from './types';
 
 // ---------------------------------------------------------------- session
 
@@ -157,6 +157,51 @@ export function useProject(id: string | undefined) {
     Boolean(id),
   );
   return { ...data, loading, reload: load };
+}
+
+// ---------------------------------------------------------------- editor
+
+/**
+ * The film's edit list and media library from the server. Reloads when sounds/clips finish or
+ * shots change; the screen keeps its own unsaved copy of the edit list.
+ */
+export function useEditState(projectId: string | undefined) {
+  const [state, setState] = useState<EditState | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const load = useCallback(() => {
+    if (!projectId) return Promise.resolve();
+    return api.getEdit(projectId).then(setState, setError);
+  }, [projectId]);
+  useEffect(() => {
+    load().catch(() => undefined);
+  }, [load]);
+  useRealtime(
+    'editor',
+    [
+      { table: 'project_assets', filter: `project_id=eq.${projectId}` },
+      { table: 'shots', filter: `project_id=eq.${projectId}` },
+      { table: 'projects', filter: `id=eq.${projectId}` },
+    ],
+    load,
+    Boolean(projectId),
+  );
+  return { state, error, reload: load, setState };
+}
+
+let editorOptionsCache: EditorOptions | null = null;
+export function useEditorOptions() {
+  const [opts, setOpts] = useState<EditorOptions | null>(editorOptionsCache);
+  useEffect(() => {
+    if (editorOptionsCache) return;
+    api
+      .editorOptions()
+      .then((o) => {
+        editorOptionsCache = o;
+        setOpts(o);
+      })
+      .catch(() => undefined);
+  }, []);
+  return opts;
 }
 
 // ---------------------------------------------------------------- Director (paying users)

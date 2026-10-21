@@ -11,9 +11,20 @@ Type an idea, get a finished short film. Maya writes the story, designs the char
 | 3 Storyboard | One still frame per shot; you approve before any video is paid for | Nano Banana 2.1 | 14 per frame |
 | 4 Film | Each approved frame becomes a 4/6/8 s clip with native dialogue and sound | Draft: Veo 3.1 Lite 720p · HD Value: LTX-2 1080p · Standard: Veo 3.1 Fast · Premium: Veo 3.1 (all via fal.ai) | 53–845 per shot (6 s shot: 80 / 96 / 238 / 634) |
 | Music | One instrumental score, looped under the film | Lyria 2 via fal.ai | 27 |
-| Final cut | Shots joined in order with the score | fal.ai FFmpeg compose | 4 per minute |
+| Final cut | Shots joined in order with the score — or your own edit (below) | Maya mixing server (FFmpeg), or fal.ai compose for a plain cut | 4 per minute |
 
 **Your own clips:** any shot can use an MP4 made elsewhere — for example in Google Flow with your own credits. Tap *Use my own clip* on the shot screen; the clip is checked (playable MP4, same vertical/wide shape, at least 4 s), kept as the newest take next to the previous one, trimmed to 4/6/8 s and used in the final cut. No credits are charged.
+
+### Edit & mix (manual editor)
+
+Open it from the Film step. Everything is saved per film; the server checks every edit.
+
+- **Picture:** reorder clips, trim the start/end of each in 0.5 s steps, duplicate, delete, add any take (newest or previous), or upload a clip from the phone. A shot's clip follows its newest take automatically unless you picked a specific take.
+- **Clip sound:** per-clip volume from mute to 200% — turn down a clip's own music, or mute it entirely.
+- **Sound layers:** music score, AI voice-overs, AI sound effects and your own MP3/M4A/WAV files. Each has a start time (or snap to any clip), trim, volume, fade in/out and play-once or loop-to-the-end.
+- **AI sounds:** sound effects from a description (1–22 s, ElevenLabs via fal.ai, 3 credits per 5 s) and voice-overs in 8 voices, English/Hindi/Marathi (ElevenLabs v3, 3 credits per 100 letters). Uploads are free.
+- **Final cut:** the mixing server (`render/`) trims, scales every clip to the film's frame (wide clips are letterboxed in a vertical film), mixes all sound with a limiter so nothing clips, and saves an MP4 + cover image. 4 credits per started minute.
+- Without the mixing server deployed, only plain cuts (whole clips + looped score) can be made, through fal.ai.
 
 ### Director tools (paid members)
 
@@ -52,17 +63,19 @@ For selling done-for-you ads to local businesses over WhatsApp. Visible only to 
 ```
 supabase/   Postgres schema, row-level security, credit ledger functions, SQL tests
 backend/    Cloudflare Worker API (Hono): auth, charged jobs, AI providers, queue, webhooks, Google Play checks
-mobile/     Expo React Native app (Android first): login, film studio, storyboard, player, wallet
+render/     Mixing server (Node + FFmpeg, Docker): turns an edit list into the final MP4
+mobile/     Expo React Native app (Android first): login, film studio, storyboard, editor, player, wallet
 ```
 
 ```
 App ──▶ Worker API ──▶ charge credits ──▶ Queue ──▶ Claude / Gemini (direct)
- ▲           │                                   └──▶ fal.ai (video, music, cut) ──webhook──▶ Worker ──▶ R2
- └── Supabase realtime (status of every shot, wallet balance)
+ ▲           │                                   ├──▶ fal.ai (video, music, voice, effects) ──webhook──▶ Worker ──▶ R2
+ │           │                                   └──▶ mixing server (FFmpeg, Cloud Run) ──────────────────────▶ R2
+ └── Supabase realtime (status of every shot, sound and wallet balance)
 ```
 
 - The app only **reads** its own rows from Supabase (row-level security). Everything that costs money goes through the Worker, which charges credits *before* calling a provider and refunds on any failure.
-- Idle cost is about $31/month (Supabase Pro + Workers Paid + domain). Everything else is pay-per-use.
+- Idle cost is about $31/month (Supabase Pro + Workers Paid + domain). Everything else is pay-per-use; the mixing server scales to zero and its free tier covers about 25 hours of rendering a month.
 
 ## Commands
 
@@ -72,9 +85,12 @@ supabase/tests/run.sh
 
 # backend
 cd backend && npm install
-npm test            # pricing, plan parsing, render timeline, webhook signatures
+npm test            # pricing, plan parsing, edit lists, queue/retry/refund paths, webhook signatures
 npm run typecheck
 npm run dev         # local worker (needs .dev.vars)
+
+# mixing server (needs ffmpeg installed) — real renders of test clips
+cd render && npm install && npm test
 
 # app
 cd mobile && npm install

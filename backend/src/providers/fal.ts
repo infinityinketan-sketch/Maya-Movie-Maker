@@ -95,7 +95,7 @@ export function resultUrl(kind: string, payload: unknown): { url: string; thumbn
   const p = payload as Record<string, any> | null;
   if (!p) return null;
   if (kind === 'video') return p.video?.url ? { url: p.video.url } : null;
-  if (kind === 'music') return p.audio?.url ? { url: p.audio.url } : null;
+  if (kind === 'music' || kind === 'sfx' || kind === 'voice') return p.audio?.url ? { url: p.audio.url } : null;
   if (kind === 'render') return p.video_url ? { url: p.video_url, thumbnail: p.thumbnail_url } : null;
   return null;
 }

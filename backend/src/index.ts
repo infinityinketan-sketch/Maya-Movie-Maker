@@ -4,7 +4,8 @@ import { HttpError, type AppUser, type Env, type JobMessage } from './env';
 import { AD_LENGTHS, adIdea, BUSINESS_TYPES, minAdvance, OCCASIONS, waLink, waMessage, type AdBrief } from './ads';
 import { CAMERA_LIBRARY, directCostUsd, directorPrices, directShot, reviewCostUsd, reviewFilm, type ShotContext } from './director';
 import { assertCanAfford, chargeJob, failJob, startJob, succeedJob } from './jobs';
-import { checkOwnClip, ProviderBusyError, withQuickRetries } from './reliability';
+import { checkOwnClip, inspectMp4, ProviderBusyError, withQuickRetries } from './reliability';
+import { audioSeconds, AUDIO_TYPES, defaultEdit, editLength, isSimpleEdit, normalizeEdit, projectMedia, type Edit } from './edit';
 import { verifyFalWebhook, type FalWebhook } from './providers/fal';
 import { getProductPurchase } from './providers/googleplay';
 import {
@@ -19,10 +20,18 @@ import {
   RENDER_MODEL,
   renderCostUsd,
   renderCredits,
+  SFX_MAX_SEC,
+  SFX_MODEL,
+  sfxCostUsd,
+  sfxCredits,
   snapDuration,
   TIERS,
   VIDEO_MODELS,
   videoCostUsd,
+  VOICE_MAX_CHARS,
+  VOICE_MODEL,
+  voiceCostUsd,
+  voiceCredits,
   type Tier,
 } from './pricing';
 import { deletePrefix, keyFromUrl, mediaKey, putBytes } from './storage';
@@ -371,23 +380,244 @@ app.post('/v1/projects/:id/music', async (c) => {
   return c.json({ job }, 202);
 });
 
+// ---------------------------------------------------------------- editor + final cut
+
+const VOICES = [
+  { id: 'Aria', label: 'Aria · woman, expressive' },
+  { id: 'Sarah', label: 'Sarah · woman, soft' },
+  { id: 'Charlotte', label: 'Charlotte · woman, warm' },
+  { id: 'Lily', label: 'Lily · woman, young' },
+  { id: 'Roger', label: 'Roger · man, confident' },
+  { id: 'George', label: 'George · man, warm' },
+  { id: 'Brian', label: 'Brian · man, deep' },
+  { id: 'Liam', label: 'Liam · man, young' },
+];
+const VOICE_LANGS: Record<string, string> = { English: 'en', Hindi: 'hi', Marathi: 'mr' };
+
+type D = ReturnType<typeof db>;
+
+/** The film's media library and its current edit list (the saved one, or Maya's default cut). */
+async function editContext(env: Env, d: D, p: Project) {
+  const shots = ((await d.from('shots').select('id,idx,video_url,prev_video_url,duration_sec').eq('project_id', p.id).order('idx')).data ?? []) as unknown as (Pick<Shot, 'id' | 'idx' | 'video_url' | 'duration_sec'> & { prev_video_url: string | null })[];
+  const assets = ((await d.from('project_assets').select('*').eq('project_id', p.id).order('created_at')).data ?? []) as {
+    id: string;
+    kind: 'sfx' | 'voice' | 'upload_audio' | 'upload_video';
+    label: string;
+    url: string | null;
+    duration_sec: number | null;
+    status: string;
+  }[];
+  const media = projectMedia(shots, p.music_url, assets);
+  let edit = defaultEdit(shots, p.music_url);
+  let custom = false;
+  if (p.edit) {
+    try {
+      edit = normalizeEdit(p.edit, media);
+      custom = true;
+    } catch {
+      // saved edit no longer valid (e.g. media deleted): fall back to the default cut
+    }
+  }
+  const missingVideos = shots.filter((s) => !s.video_url).length;
+  return { shots, assets, media, edit, custom, missingVideos };
+}
+
+function editResponse(env: Env, ctx: Awaited<ReturnType<typeof editContext>>) {
+  const seconds = editLength(ctx.edit);
+  const simple = isSimpleEdit(ctx.edit, ctx.media);
+  return {
+    edit: ctx.edit,
+    custom: ctx.custom,
+    media: ctx.media,
+    assets: ctx.assets,
+    seconds,
+    mixer: Boolean(env.RENDER_SERVICE_URL),
+    simple,
+    renderCredits: renderCredits(seconds, priceConfig(env)),
+    missingVideos: ctx.missingVideos,
+  };
+}
+
+app.get('/v1/projects/:id/edit', async (c) => {
+  const d = db(c.env);
+  const p = await getOwnedProject(d, c.get('user').id, c.req.param('id'));
+  return c.json(editResponse(c.env, await editContext(c.env, d, p)));
+});
+
+/** Saves the edit list ({ edit }) or goes back to Maya's default cut ({ reset: true }). */
+app.put('/v1/projects/:id/edit', async (c) => {
+  const d = db(c.env);
+  const p = await getOwnedProject(d, c.get('user').id, c.req.param('id'));
+  const b = await body(c);
+  let saved: Edit | null = null;
+  if (b.reset !== true) {
+    const ctx = await editContext(c.env, d, p);
+    saved = normalizeEdit(b.edit, ctx.media);
+  }
+  const res = await d.from('projects').update({ edit: saved }).eq('id', p.id);
+  if (res.error) throw new Error(res.error.message);
+  return c.json(editResponse(c.env, await editContext(c.env, d, { ...p, edit: saved })));
+});
+
+app.get('/v1/editor/options', (c) => {
+  const cfg = priceConfig(c.env);
+  return c.json({
+    voices: VOICES,
+    languages: Object.keys(VOICE_LANGS),
+    sfxMaxSec: SFX_MAX_SEC,
+    voiceMaxChars: VOICE_MAX_CHARS,
+    sfxPer5Sec: sfxCredits(5, cfg),
+    voicePer100Chars: voiceCredits(100, cfg),
+    mixer: Boolean(c.env.RENDER_SERVICE_URL),
+  });
+});
+
+/** Upload a sound (MP3/M4A/WAV) or a video clip into the film's library. No credits. */
+app.post('/v1/projects/:id/assets', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  const p = await getOwnedProject(d, user.id, c.req.param('id'));
+  const type = (c.req.header('content-type') || '').split(';')[0].trim().toLowerCase();
+  const label = (c.req.query('label') || '').trim().slice(0, 60);
+  const count = await d.from('project_assets').select('id', { count: 'exact', head: true }).eq('project_id', p.id);
+  if ((count.count ?? 0) >= 100) throw new HttpError(400, 'too_many', 'This film already has 100 sounds and clips. Delete some first.');
+  const buf = new Uint8Array(await c.req.arrayBuffer());
+  let row: Record<string, unknown>;
+  if (type.startsWith('video/')) {
+    if (buf.byteLength > 90 * 1024 * 1024) throw new HttpError(413, 'too_big', 'Clips must be under 90 MB.');
+    const info = inspectMp4(buf);
+    if (!info || !info.hasVideo) throw new HttpError(400, 'bad_clip', 'Send an MP4 video.');
+    const seconds = info.durationSec ?? 0;
+    if (seconds < 0.5 || seconds > 300) throw new HttpError(400, 'bad_clip', 'Clips must be between 0.5 seconds and 5 minutes.');
+    const id = crypto.randomUUID();
+    const url = await putBytes(c.env, mediaKey(user.id, p.id, 'upload', id, 'mp4'), buf, 'video/mp4');
+    row = { id, kind: 'upload_video', label: label || 'My clip', url, duration_sec: Math.round(seconds * 100) / 100 };
+  } else {
+    const ext = AUDIO_TYPES[type];
+    if (!ext) throw new HttpError(415, 'bad_type', 'Send an MP3, M4A or WAV sound file.');
+    if (buf.byteLength < 1000 || buf.byteLength > 25 * 1024 * 1024) throw new HttpError(413, 'bad_size', 'Sound files must be under 25 MB.');
+    const seconds = audioSeconds(buf, ext);
+    if (!seconds || seconds < 0.2 || seconds > 900) throw new HttpError(400, 'bad_audio', 'That sound file could not be read. Try an MP3, M4A or WAV.');
+    const id = crypto.randomUUID();
+    const url = await putBytes(c.env, mediaKey(user.id, p.id, 'upload', id, ext), buf, ext === 'mp3' ? 'audio/mpeg' : ext === 'm4a' ? 'audio/mp4' : 'audio/wav');
+    row = { id, kind: 'upload_audio', label: label || 'My sound', url, duration_sec: Math.round(seconds * 100) / 100 };
+  }
+  const ins = must(await d.from('project_assets').insert({ ...row, project_id: p.id, user_id: user.id, status: 'done' }).select('*').single(), 'asset');
+  return c.json(ins, 201);
+});
+
+app.delete('/v1/assets/:id', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  const a = must(await d.from('project_assets').select('*').eq('id', c.req.param('id')).eq('user_id', user.id).maybeSingle(), 'asset') as {
+    id: string;
+    url: string | null;
+    status: string;
+  };
+  if (busy(a.status)) throw new HttpError(409, 'busy', 'This sound is still being made.');
+  const key = a.url ? keyFromUrl(c.env, a.url) : null;
+  if (key) await c.env.MEDIA.delete(key);
+  await d.from('project_assets').delete().eq('id', a.id);
+  return c.json({ ok: true });
+});
+
+/** AI sound effect from a description ("door slams", "crowd cheering"). */
+app.post('/v1/projects/:id/sfx', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  const p = await getOwnedProject(d, user.id, c.req.param('id'));
+  const b = await body(c);
+  const prompt = text(b.prompt, 3, 300, 'Description');
+  const seconds = Math.min(SFX_MAX_SEC, Math.max(1, Math.round(Number(b.seconds) || 3)));
+  const asset = must(
+    await d
+      .from('project_assets')
+      .insert({ project_id: p.id, user_id: user.id, kind: 'sfx', label: optText(b.label, 60) || prompt.slice(0, 40), prompt, status: 'queued' })
+      .select('*')
+      .single(),
+    'asset',
+  ) as { id: string };
+  try {
+    const job = await startJob(c.env, d, {
+      userId: user.id,
+      projectId: p.id,
+      targetId: asset.id,
+      kind: 'sfx',
+      credits: sfxCredits(seconds, priceConfig(c.env)),
+      costUsd: sfxCostUsd(seconds),
+      provider: 'fal',
+      model: SFX_MODEL,
+      input: { prompt, seconds },
+    });
+    return c.json({ job, asset }, 202);
+  } catch (e) {
+    await d.from('project_assets').delete().eq('id', asset.id);
+    throw e;
+  }
+});
+
+/** AI voice-over from text, in one of the listed voices. */
+app.post('/v1/projects/:id/voice', async (c) => {
+  const user = c.get('user');
+  const d = db(c.env);
+  const p = await getOwnedProject(d, user.id, c.req.param('id'));
+  const b = await body(c);
+  const words = text(b.text, 2, VOICE_MAX_CHARS, 'Voice-over text');
+  const voice = VOICES.some((v) => v.id === b.voice) ? (b.voice as string) : VOICES[0].id;
+  const language = typeof b.language === 'string' && VOICE_LANGS[b.language] ? b.language : null;
+  const asset = must(
+    await d
+      .from('project_assets')
+      .insert({ project_id: p.id, user_id: user.id, kind: 'voice', label: optText(b.label, 60) || `${voice}: ${words.slice(0, 30)}`, prompt: words, status: 'queued' })
+      .select('*')
+      .single(),
+    'asset',
+  ) as { id: string };
+  try {
+    const job = await startJob(c.env, d, {
+      userId: user.id,
+      projectId: p.id,
+      targetId: asset.id,
+      kind: 'voice',
+      credits: voiceCredits(words.length, priceConfig(c.env)),
+      costUsd: voiceCostUsd(words.length),
+      provider: 'fal',
+      model: VOICE_MODEL,
+      input: { text: words, voice, ...(language ? { language_code: VOICE_LANGS[language] } : {}) },
+    });
+    return c.json({ job, asset }, 202);
+  } catch (e) {
+    await d.from('project_assets').delete().eq('id', asset.id);
+    throw e;
+  }
+});
+
+/** Final cut of the current edit list. Trims, volumes and sound overlays need the mixing server. */
 app.post('/v1/projects/:id/render', async (c) => {
   const user = c.get('user');
   const d = db(c.env);
   const p = await getOwnedProject(d, user.id, c.req.param('id'));
-  const shots = ((await d.from('shots').select('video_url,duration_sec').eq('project_id', p.id)).data ?? []) as Shot[];
-  if (!shots.length || shots.some((s) => !s.video_url)) throw new HttpError(400, 'missing_videos', 'Every shot needs a video before the final cut.');
-  const seconds = shots.reduce((s, x) => s + x.duration_sec, 0);
-  const cost = renderCostUsd(seconds);
+  if (busy(p.render_status ?? '')) throw new HttpError(409, 'busy', 'The final cut is already being made.');
+  const ctx = await editContext(c.env, d, p);
+  if (!ctx.custom && ctx.missingVideos > 0) {
+    throw new HttpError(400, 'missing_videos', 'Every shot needs a video before the final cut — or open the editor to cut the film without them.');
+  }
+  if (!ctx.edit.clips.length) throw new HttpError(400, 'empty_edit', 'Add at least one clip to the cut.');
+  const seconds = editLength(ctx.edit);
+  const mixer = Boolean(c.env.RENDER_SERVICE_URL);
+  if (!mixer && !isSimpleEdit(ctx.edit, ctx.media)) {
+    throw new HttpError(400, 'needs_mixer', 'Trims, volume changes and extra sounds need the mixing server, which is not set up yet.');
+  }
   const job = await startJob(c.env, d, {
     userId: user.id,
     projectId: p.id,
     targetId: p.id,
     kind: 'render',
     credits: renderCredits(seconds, priceConfig(c.env)),
-    costUsd: cost,
-    provider: 'fal',
-    model: RENDER_MODEL,
+    costUsd: renderCostUsd(seconds),
+    provider: mixer ? 'maya' : 'fal',
+    model: mixer ? 'ffmpeg-mixer' : RENDER_MODEL,
+    input: { edit: ctx.edit, seconds, mixer },
   });
   await d.from('projects').update({ render_status: 'queued', status: 'rendering' }).eq('id', p.id);
   return c.json({ job }, 202);

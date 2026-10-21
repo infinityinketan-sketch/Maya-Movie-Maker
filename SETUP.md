@@ -7,20 +7,21 @@ From zero to the app running on your phone, then on the Play Store. Do the steps
 | Value | Put it in |
 |---|---|
 | Supabase URL, anon (publishable) key, Worker URL | `mobile/.env` (public, bundled into the app) |
-| Supabase service role key, Anthropic, Gemini, fal.ai keys, Google service account | Cloudflare Worker secrets (`npx wrangler secret put …`) |
+| Supabase service role key, Anthropic, Gemini, fal.ai keys, Google service account, mixing server URL + secret | Cloudflare Worker secrets (`npx wrangler secret put …`) |
+| R2 access keys, mixing server secret | Mixing server environment (Cloud Run, step 3b) |
 
 ---
 
 ## 1. Supabase (database + login) — free while building, $25/month in production
 
 1. Create a project at supabase.com (region: Mumbai `ap-south-1`).
-2. **Database:** open *SQL Editor*, paste and run each file in `supabase/migrations/` in name order (`…0001_init.sql`, `…0002_director.sql`, `…0003_shop_ads.sql`, `…0004_order_advance.sql`, `…0005_video_value_tier.sql`, `…0006_job_recovery.sql`). (Or with the CLI: `supabase link` then `supabase db push`.)
+2. **Database:** open *SQL Editor*, paste and run each file in `supabase/migrations/` in name order (`…0001_init.sql`, `…0002_director.sql`, `…0003_shop_ads.sql`, `…0004_order_advance.sql`, `…0005_video_value_tier.sql`, `…0006_job_recovery.sql`, `…0007_editor.sql`). (Or with the CLI: `supabase link` then `supabase db push`.)
 3. **Login by email code:** *Authentication → Sign In / Providers → Email*: enable Email, keep "Confirm email" on.
    *Authentication → Emails → Templates → Magic Link*: replace the body so it shows the code, e.g.
    `<h2>Your Maya login code</h2><p style="font-size:28px"><b>{{ .Token }}</b></p>`
    (the app asks for the code; it does not use the link).
 4. For real users, set up custom SMTP (*Authentication → Emails → SMTP*), e.g. Resend's free tier — Supabase's built-in mail is rate-limited.
-5. **Realtime:** *Database → Publications → supabase_realtime*: check that `projects`, `shots`, `characters`, `jobs`, `wallets` are on (the migration adds them).
+5. **Realtime:** *Database → Publications → supabase_realtime*: check that `projects`, `shots`, `characters`, `jobs`, `wallets`, `ad_orders`, `project_assets` are on (the migrations add them).
 6. Copy from *Project Settings → API*: **Project URL**, **anon / publishable key**, **service_role / secret key**.
 
 Upgrade to Pro before launch: free projects pause after a week without traffic.
@@ -31,7 +32,7 @@ Upgrade to Pro before launch: free projects pause after a week without traffic.
 |---|---|---|
 | Anthropic | Story + shot list | console.anthropic.com → API keys. Add ~$10 credit. |
 | Google AI Studio (Gemini) | Character looks + storyboard frames | aistudio.google.com → Get API key. Enable billing on the project (image models are paid-only). |
-| fal.ai | Video (Veo 3.1), music (Lyria 2), final cut | fal.ai → Keys. Add ~$20 credit. |
+| fal.ai | Video (Veo 3.1, LTX-2), music (Lyria 2), voice-overs and sound effects (ElevenLabs), plain final cut | fal.ai → Keys. Add ~$20 credit. |
 
 Set a monthly spend limit or alert in each console.
 
@@ -60,6 +61,31 @@ npx wrangler queues create maya-jobs
 6. Check: open `<worker url>/v1/catalog` — you should see the credit prices.
 
 The Workers Paid plan ($5/month) is needed for Queues.
+
+## 3b. Mixing server (editor: trims, volumes, voice-over, sound effects) — $0 when idle
+
+The editor's final cut runs FFmpeg in a small container (`render/`). Google Cloud Run is the easiest home: it scales to zero (no cost while nobody renders) and its free tier (180,000 vCPU-seconds a month) covers about 25 hours of rendering. After that, a 1-minute film costs well under $0.01 to render; Maya charges 4 credits (₹4).
+
+1. **R2 key for the server:** Cloudflare dashboard → R2 → *Manage R2 API Tokens* → *Create API token* → permission *Object Read & Write*, bucket `maya-media`. Copy the **Access Key ID**, **Secret Access Key** and the endpoint `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+2. **A shared secret** between the Worker and the server: any long random string, e.g. `openssl rand -hex 32`.
+3. **Deploy** (Google Cloud console → enable Cloud Run and Cloud Build; install the `gcloud` CLI and `gcloud auth login`):
+   ```bash
+   cd render
+   gcloud run deploy maya-render --source . --region asia-south1 \
+     --cpu 2 --memory 4Gi --concurrency 1 --timeout 900 \
+     --min-instances 0 --max-instances 3 --allow-unauthenticated \
+     --set-env-vars RENDER_SECRET=<secret>,MEDIA_PUBLIC_BASE=<same as wrangler.toml>,R2_ENDPOINT=<endpoint>,R2_BUCKET=maya-media,R2_ACCESS_KEY_ID=<id>,R2_SECRET_ACCESS_KEY=<secret key>
+   ```
+   It prints a URL like `https://maya-render-xxxx.a.run.app`. Open `<url>/health` — you should see `{"ok":true}`. (`--allow-unauthenticated` only lets requests reach it; every render still needs the secret.)
+4. **Tell the Worker:**
+   ```bash
+   cd backend
+   npx wrangler secret put RENDER_SERVICE_URL   # the Cloud Run URL
+   npx wrangler secret put RENDER_SECRET        # the same secret
+   ```
+   The server only downloads media from your `MEDIA_PUBLIC_BASE` and only writes under `u/…` keys.
+
+Without this step the app still works: the editor shows a note, and only plain cuts (whole clips + looped score) are made by fal.ai. Any machine with Docker works too (`docker build -t maya-render render/`, same environment variables, port 8080) — Fly.io with auto-stop is a good alternative.
 
 ## 4. Run the app on your phone
 
@@ -135,7 +161,8 @@ where id = (select id from auth.users where email = 'you@example.com');
 
 These depend on provider behaviour that can only be confirmed with real keys:
 
-1. **Final cut audio.** The final cut uses fal.ai's FFmpeg compose with the shot videos as one track and the music as another. Confirm the shots' own dialogue/sound is kept in the output. If it is dropped, tell me and I'll switch the cut to a small FFmpeg render service.
+1. **Final cut audio.** With the mixing server deployed, every cut goes through it and the shots' own dialogue is mixed with the score (tested here with real FFmpeg renders). Without it, fal.ai's compose makes plain cuts — confirm the shots' dialogue is kept there.
+5. **Voices and languages.** Make one Hindi and one Marathi voice-over in the editor. If a voice name or Marathi is refused (credits come back), tell me and I'll adjust the voice list.
 2. **Gemini image model id.** `GEMINI_IMAGE_MODEL` defaults to `gemini-nano-banana-2.1`. If storyboard frames fail with "model not found", set it to `gemini-3.1-flash-image` in `wrangler.toml`.
 3. **HD Value vs Standard.** Film the same 3 shots on HD Value (LTX-2, $0.06/s) and Standard (Veo 3.1 Fast, $0.15/s): switch the film's quality and re-take — each shot screen shows the new and previous take together. If LTX-2 keeps faces, frames and Marathi/Hindi dialogue well enough, use it as your default HD.
 4. **Dialogue language.** Veo speaks Hindi and other Indian languages unevenly; try a Hindi and an English shot before promising languages in the store listing.

@@ -142,19 +142,19 @@ export function checkOwnClip(bytes: Uint8Array, aspectRatio: '16:9' | '9:16'): {
 // ---------------------------------------------------------------- result checks
 
 export interface MediaExpectation {
-  kind: 'video' | 'render' | 'music' | 'image';
+  kind: 'video' | 'render' | 'music' | 'sound' | 'image';
   seconds?: number; // expected length
   aspectRatio?: '16:9' | '9:16';
   needsAudio?: boolean;
 }
 
-const MIN_BYTES: Record<MediaExpectation['kind'], number> = { video: 100_000, render: 200_000, music: 100_000, image: 20_000 };
+const MIN_BYTES: Record<MediaExpectation['kind'], number> = { video: 100_000, render: 200_000, music: 100_000, sound: 4_000, image: 20_000 };
 
 /** Returns why a result is unusable, or null when it passes. */
 export function checkMedia(bytes: Uint8Array, contentType: string, exp: MediaExpectation): string | null {
   if (bytes.byteLength < MIN_BYTES[exp.kind]) return `the file is too small (${Math.round(bytes.byteLength / 1024)} KB)`;
   if (exp.kind === 'image') return /^image\//.test(contentType) ? null : `expected an image, got ${contentType || 'unknown type'}`;
-  if (exp.kind === 'music') return /^audio\//.test(contentType) || contentType === 'application/octet-stream' ? null : `expected audio, got ${contentType}`;
+  if (exp.kind === 'music' || exp.kind === 'sound') return /^audio\//.test(contentType) || contentType === 'application/octet-stream' ? null : `expected audio, got ${contentType}`;
 
   const mp4 = inspectMp4(bytes);
   if (!mp4) return 'the file is not a playable MP4 video';

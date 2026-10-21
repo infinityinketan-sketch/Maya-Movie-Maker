@@ -20,13 +20,16 @@ export interface Env {
   // Google Play billing
   GOOGLE_PLAY_PACKAGE: string;
   GOOGLE_SERVICE_ACCOUNT_JSON: string;
+  // Mixing server (optional): without it only simple cuts (whole clips + looped score) can be made
+  RENDER_SERVICE_URL?: string;
+  RENDER_SECRET?: string;
 }
 
 export type JobMessage =
   | { type: 'start'; jobId: string; attempt?: number }
   | { type: 'finalize'; jobId: string; ok: boolean; result?: unknown; error?: string; attempt?: number };
 
-export type JobKind = 'plan' | 'portrait' | 'keyframe' | 'video' | 'music' | 'render' | 'director' | 'poster';
+export type JobKind = 'plan' | 'portrait' | 'keyframe' | 'video' | 'music' | 'render' | 'director' | 'poster' | 'sfx' | 'voice';
 
 export interface AppUser {
   id: string;

@@ -142,5 +142,19 @@ begin
 end $$;
 reset role;
 
+-- Editor: sounds/clips are private to their owner; jobs accept the new kinds
+insert into public.project_assets (project_id, user_id, kind, label, url, duration_sec)
+select id, user_id, 'sfx', 'Door slam', 'https://m/door.mp3', 2 from public.projects
+where user_id = '00000000-0000-0000-0000-00000000000a' limit 1;
+insert into public.jobs (user_id, kind, credits, status)
+values ('00000000-0000-0000-0000-00000000000a', 'voice', 3, 'queued');
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+do $$
+begin
+  assert (select count(*) from public.project_assets) = 0, 'user B must not see user A sounds';
+end $$;
+reset role;
+
 rollback;
 \echo 'ALL CREDIT TESTS PASSED'

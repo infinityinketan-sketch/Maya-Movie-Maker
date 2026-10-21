@@ -1,6 +1,6 @@
 import { config } from './config';
 import { supabase } from './supabase';
-import type { AdOrder, OrderStatus, CameraGroup, Catalog, Character, DirectorOption, FilmReview, Project, Shot, Tier } from './types';
+import type { AdOrder, OrderStatus, CameraGroup, Catalog, Character, DirectorOption, Edit, EditorOptions, EditState, FilmReview, Project, ProjectAsset, Shot, Tier } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -58,6 +58,20 @@ async function uploadClip(shotId: string, uri: string, mimeType: string): Promis
   });
   const json = (await res.json().catch(() => ({}))) as Shot & { error?: string; message?: string };
   if (!res.ok) throw new ApiError(res.status, json.error ?? 'upload', json.message ?? 'Clip upload failed.');
+  return json;
+}
+
+/** Uploads a sound (MP3/M4A/WAV) or a video clip into a film's editor library. No credits. */
+async function uploadAsset(projectId: string, uri: string, mimeType: string, label: string): Promise<ProjectAsset> {
+  const { data } = await supabase.auth.getSession();
+  const blob = await (await fetch(uri)).blob();
+  const res = await fetch(`${config.apiUrl}/v1/projects/${projectId}/assets?label=${encodeURIComponent(label.slice(0, 60))}`, {
+    method: 'POST',
+    headers: { 'content-type': mimeType, authorization: `Bearer ${data.session?.access_token ?? ''}` },
+    body: blob,
+  });
+  const json = (await res.json().catch(() => ({}))) as ProjectAsset & { error?: string; message?: string };
+  if (!res.ok) throw new ApiError(res.status, json.error ?? 'upload', json.message ?? 'Upload failed.');
   return json;
 }
 
@@ -123,6 +137,15 @@ export const api = {
   poster: (projectId: string) => call('POST', `/v1/projects/${projectId}/poster`),
   uploadPhoto,
   uploadClip,
+
+  getEdit: (projectId: string) => call<EditState>('GET', `/v1/projects/${projectId}/edit`),
+  saveEdit: (projectId: string, edit: Edit) => call<EditState>('PUT', `/v1/projects/${projectId}/edit`, { edit }),
+  resetEdit: (projectId: string) => call<EditState>('PUT', `/v1/projects/${projectId}/edit`, { reset: true }),
+  editorOptions: () => call<EditorOptions>('GET', '/v1/editor/options'),
+  soundEffect: (projectId: string, input: { prompt: string; seconds: number }) => call('POST', `/v1/projects/${projectId}/sfx`, input),
+  voiceOver: (projectId: string, input: { text: string; voice: string; language?: string }) => call('POST', `/v1/projects/${projectId}/voice`, input),
+  deleteAsset: (id: string) => call<{ ok: true }>('DELETE', `/v1/assets/${id}`),
+  uploadAsset,
 
   verifyPlayPurchase: (productId: string, purchaseToken: string) =>
     call<{ ok: true; balance: number; credits: number }>('POST', '/v1/billing/google-play/verify', { productId, purchaseToken }),

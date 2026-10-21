@@ -25,7 +25,7 @@ export interface Project {
   style: string | null;
   aspect_ratio: '16:9' | '9:16';
   target_duration_sec: number;
-  tier: 'budget' | 'standard' | 'premium';
+  tier: 'budget' | 'value' | 'standard' | 'premium';
   status: string;
   logline: string | null;
   synopsis: string | null;
@@ -35,6 +35,8 @@ export interface Project {
   kind: 'film' | 'ad';
   ad_brief: import('./ads').AdBrief | null;
   poster_url: string | null;
+  edit: unknown;
+  render_status?: string;
 }
 
 export interface AdOrder {

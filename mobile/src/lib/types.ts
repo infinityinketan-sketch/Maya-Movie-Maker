@@ -25,6 +25,8 @@ export interface Project {
   ad_brief: AdBrief | null;
   poster_url: string | null;
   poster_status: GenStatus;
+  /** The user's own edit list; null = Maya's default cut. */
+  edit: Edit | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -174,3 +176,80 @@ export interface FilmReview {
 
 export const TIER_NAMES: Record<Tier, string> = { budget: 'Draft', value: 'HD Value', standard: 'Standard', premium: 'Premium' };
 export const TIER_ORDER: Tier[] = ['budget', 'value', 'standard', 'premium'];
+
+// ---------------------------------------------------------------- editor
+
+export interface EditClip {
+  id: string;
+  shotId?: string;
+  pinned?: boolean;
+  url: string;
+  label: string;
+  in: number;
+  out: number;
+  volume: number;
+}
+
+export type AudioKind = 'music' | 'voice' | 'sfx' | 'upload';
+
+export interface EditAudio {
+  id: string;
+  kind: AudioKind;
+  url: string;
+  label: string;
+  start: number;
+  in: number;
+  out: number;
+  volume: number;
+  fadeIn: number;
+  fadeOut: number;
+  loop: boolean;
+}
+
+export interface Edit {
+  version: 1;
+  clips: EditClip[];
+  audio: EditAudio[];
+}
+
+export interface MediaItem {
+  url: string;
+  type: 'video' | 'audio';
+  label: string;
+  seconds: number;
+  shotId?: string;
+  assetId?: string;
+  audioKind?: AudioKind;
+}
+
+export interface ProjectAsset {
+  id: string;
+  kind: 'sfx' | 'voice' | 'upload_audio' | 'upload_video';
+  label: string;
+  url: string | null;
+  duration_sec: number | null;
+  status: GenStatus;
+  error: string | null;
+}
+
+export interface EditState {
+  edit: Edit;
+  custom: boolean;
+  media: MediaItem[];
+  assets: ProjectAsset[];
+  seconds: number;
+  mixer: boolean;
+  simple: boolean;
+  renderCredits: number;
+  missingVideos: number;
+}
+
+export interface EditorOptions {
+  voices: { id: string; label: string }[];
+  languages: string[];
+  sfxMaxSec: number;
+  voiceMaxChars: number;
+  sfxPer5Sec: number;
+  voicePer100Chars: number;
+  mixer: boolean;
+}

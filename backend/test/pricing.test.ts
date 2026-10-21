@@ -89,3 +89,14 @@ describe('video models', () => {
     expect(VIDEO_MODELS.standard.input({ prompt: 'p', imageUrl: 'u', seconds: 8, aspectRatio: '16:9' })).toMatchObject({ duration: '8s', aspect_ratio: '16:9' });
   });
 });
+
+describe('editor sounds', () => {
+  it('sound effects and voice-overs are charged at least API price × markup', async () => {
+    const { sfxCredits, sfxCostUsd, voiceCredits, voiceCostUsd } = await import('../src/pricing');
+    const cfg = { usdInr: 88, markup: 3 };
+    for (const s of [1, 5, 6, 22]) expect(sfxCredits(s, cfg)).toBeGreaterThanOrEqual(sfxCostUsd(s) * 88 * 3);
+    for (const n of [1, 100, 101, 1000]) expect(voiceCredits(n, cfg)).toBeGreaterThanOrEqual(voiceCostUsd(n) * 88 * 3);
+    expect(sfxCredits(22, cfg)).toBe(15);
+    expect(voiceCredits(250, cfg)).toBe(9);
+  });
+});

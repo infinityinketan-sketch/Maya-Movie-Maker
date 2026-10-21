@@ -1,0 +1,16 @@
+{
+  "name": "maya-render",
+  "private": true,
+  "type": "module",
+  "description": "FFmpeg mixing server for Maya: trims, joins and mixes an edit list into the final MP4.",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "aws4fetch": "1.0.20"
+  }
+}

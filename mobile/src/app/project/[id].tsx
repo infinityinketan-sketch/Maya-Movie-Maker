@@ -549,17 +549,28 @@ function FilmStep({ project, shots, cat, balance }: Ctx) {
       <SectionLabel right={<StatusPill status={project.render_status} />}>Final cut</SectionLabel>
       <Card>
         <Text style={type.small}>
-          {allFilmed
-            ? `Joins all ${shots.length} shots${project.music_url ? ' with your score' : ''} into one ${seconds}-second film.`
-            : 'Film every shot first. The final cut joins them in order.'}
+          {project.edit
+            ? 'Your own edit is saved — trims, order and sounds. Make the cut from the editor.'
+            : allFilmed
+              ? `Joins all ${shots.length} shots${project.music_url ? ' with your score' : ''} into one ${seconds}-second film. Want to trim, reorder or add voice-over and sound effects? Open the editor.`
+              : 'Film every shot first — or open the editor to cut the film from the shots you have.'}
         </Text>
+        {project.edit ? null : (
+          <Button
+            title={project.final_video_url ? 'Re-cut the film' : 'Make the final cut'}
+            cost={renderCost}
+            disabled={!allFilmed || rendering}
+            loading={busy === 'render'}
+            style={{ marginTop: space(1.5) }}
+            onPress={() => run('render', { action: 'Make the final cut', credits: renderCost, balance }, () => api.render(project.id))}
+          />
+        )}
         <Button
-          title={project.final_video_url ? 'Re-cut the film' : 'Make the final cut'}
-          cost={renderCost}
-          disabled={!allFilmed || rendering}
-          loading={busy === 'render'}
-          style={{ marginTop: space(1.5) }}
-          onPress={() => run('render', { action: 'Make the final cut', credits: renderCost, balance }, () => api.render(project.id))}
+          title="Edit & mix"
+          kind={project.edit ? 'primary' : 'secondary'}
+          disabled={filmed === 0 || rendering}
+          style={{ marginTop: space(1) }}
+          onPress={() => router.push({ pathname: '/edit/[id]', params: { id: project.id } })}
         />
       </Card>
 

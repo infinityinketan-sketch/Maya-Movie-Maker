@@ -8,31 +8,35 @@ import { planFilm } from './providers/anthropic';
 import { falLookup, falSubmit, resultUrl, type FalSubmission } from './providers/fal';
 import { generateImage, type InlineImage } from './providers/gemini';
 import { posterPrompt } from './ads';
-import { billedSeconds, MUSIC_MODEL, RENDER_MODEL, VIDEO_MODELS, type Tier } from './pricing';
+import { audioSeconds, editLength, falTracks, renderJobBody, type Edit } from './edit';
+import { billedSeconds, MUSIC_MODEL, RENDER_MODEL, SFX_MODEL, VIDEO_MODELS, VOICE_MODEL, type Tier } from './pricing';
 import { checkMedia, ProviderBusyError, retryDelay, type MediaExpectation } from './reliability';
-import { copyFromUrl, download, fromBase64, mediaKey, putBytes, readAsBase64 } from './storage';
+import { copyFromUrl, download, fromBase64, mediaKey, publicUrl, putBytes, readAsBase64 } from './storage';
 
 export async function handleQueue(batch: MessageBatch<JobMessage>, env: Env): Promise<void> {
   const d = db(env);
-  for (const msg of batch.messages) {
-    try {
-      if (msg.body.type === 'start') await startJobWork(env, d, msg.body.jobId);
-      else await finalizeJob(env, d, msg.body);
-    } catch (e) {
-      console.error('job error', msg.body, e);
-      if (e instanceof ProviderBusyError && (await retryLater(env, d, msg.body, e))) {
-        msg.ack();
-        continue;
-      }
-      try {
-        await markTarget(d, await loadJob(d, msg.body.jobId), 'failed', errText(e));
-        await failJob(d, msg.body.jobId, errText(e));
-      } catch (inner) {
-        console.error('could not fail job', inner);
-      }
+  // In parallel: a long render must not hold up the other jobs in the batch.
+  await Promise.all(batch.messages.map((msg) => handleMessage(env, d, msg)));
+}
+
+async function handleMessage(env: Env, d: Db, msg: Message<JobMessage>): Promise<void> {
+  try {
+    if (msg.body.type === 'start') await startJobWork(env, d, msg.body.jobId);
+    else await finalizeJob(env, d, msg.body);
+  } catch (e) {
+    console.error('job error', msg.body, e);
+    if (e instanceof ProviderBusyError && (await retryLater(env, d, msg.body, e))) {
+      msg.ack();
+      return;
     }
-    msg.ack();
+    try {
+      await markTarget(d, await loadJob(d, msg.body.jobId), 'failed', errText(e));
+      await failJob(d, msg.body.jobId, errText(e));
+    } catch (inner) {
+      console.error('could not fail job', inner);
+    }
   }
+  msg.ack();
 }
 
 /** Re-queues a job whose provider was busy. Returns false once the retries are used up. */
@@ -95,6 +99,9 @@ async function markTarget(d: Db, job: Job, status: 'running' | 'done' | 'failed'
       return update(d, 'projects', job.target_id, { music_status: status, ...extra });
     case 'poster':
       return update(d, 'projects', job.target_id, { poster_status: status, ...extra });
+    case 'sfx':
+    case 'voice':
+      return update(d, 'project_assets', job.target_id, { status, ...e, ...extra });
     case 'render':
       return update(d, 'projects', job.target_id, {
         render_status: status,
@@ -126,6 +133,22 @@ async function startJobWork(env: Env, d: Db, jobId: string): Promise<void> {
       return submitRender(env, d, job);
     case 'poster':
       return runPoster(env, d, job);
+    case 'sfx':
+      return saveSubmission(
+        d,
+        job.id,
+        await falSubmit(env, SFX_MODEL, { text: String(job.input.prompt), duration_seconds: Number(job.input.seconds), prompt_influence: 0.4 }),
+      );
+    case 'voice':
+      return saveSubmission(
+        d,
+        job.id,
+        await falSubmit(env, VOICE_MODEL, {
+          text: String(job.input.text),
+          voice: String(job.input.voice || 'Aria'),
+          ...(job.input.language_code ? { language_code: String(job.input.language_code) } : {}),
+        }),
+      );
     case 'director':
       return; // handled inside the request
   }
@@ -308,32 +331,67 @@ async function submitMusic(env: Env, d: Db, job: Job): Promise<void> {
   await saveSubmission(d, job.id, sub);
 }
 
-/** Builds the fal FFmpeg compose timeline: shots back to back, music looped quietly underneath. */
-export function renderTracks(shots: Pick<Shot, 'video_url' | 'duration_sec'>[], musicUrl: string | null, musicLoopSec = 30) {
-  let t = 0;
-  const video = shots.map((s) => {
-    const k = { url: s.video_url!, timestamp: t, duration: s.duration_sec * 1000 };
-    t += s.duration_sec * 1000;
-    return k;
-  });
-  const tracks: { id: string; type: 'video' | 'audio'; keyframes: { url: string; timestamp: number; duration: number }[] }[] = [
-    { id: 'shots', type: 'video', keyframes: video },
-  ];
-  if (musicUrl) {
-    const music: { url: string; timestamp: number; duration: number }[] = [];
-    for (let m = 0; m < t; m += musicLoopSec * 1000) music.push({ url: musicUrl, timestamp: m, duration: Math.min(musicLoopSec * 1000, t - m) });
-    tracks.push({ id: 'music', type: 'audio', keyframes: music });
-  }
-  return { tracks, totalMs: t };
-}
-
+/**
+ * Final cut from the edit list saved with the job. Cuts with trims, volumes or sound overlays go to
+ * our mixing server (FFmpeg); a plain cut can also be joined by fal.ai's compose.
+ */
 async function submitRender(env: Env, d: Db, job: Job): Promise<void> {
   const p = await loadProject(d, job.project_id!);
-  const shots = (await d.from('shots').select('video_url,duration_sec,idx').eq('project_id', p.id).order('idx')).data as Shot[];
-  if (!shots?.length || shots.some((s) => !s.video_url)) throw new Error('every shot needs a video before rendering');
-  const { tracks } = renderTracks(shots, p.music_url);
+  const edit = job.input.edit as Edit | undefined;
+  if (!edit?.clips?.length) throw new Error('the cut has no clips');
+  if (job.input.mixer) return runMixer(env, d, job, p, edit);
+  const { tracks } = falTracks(edit);
   const sub = await falSubmit(env, RENDER_MODEL, { tracks });
   await saveSubmission(d, job.id, sub);
+}
+
+const MIXER_TIMEOUT_MS = 14 * 60_000; // queue consumers may run up to 15 minutes
+
+interface MixerResult {
+  url: string;
+  thumbnailUrl: string | null;
+  bytes: number;
+  seconds: number;
+  width: number;
+  height: number;
+  hasAudio: boolean;
+}
+
+/** Checks what the mixing server reports about the finished film. Returns a problem or null. */
+export function checkMixerResult(r: MixerResult, expectedUrl: string, expectedSec: number, aspectRatio: '16:9' | '9:16'): string | null {
+  if (r.url !== expectedUrl) return 'the film was saved in the wrong place';
+  if (!(r.bytes >= 200_000)) return 'the film file is too small';
+  if (!r.hasAudio) return 'the film has no sound';
+  if (Math.abs(r.seconds - expectedSec) > 2) return `the film is ${r.seconds.toFixed(1)} s long (expected ${expectedSec.toFixed(1)} s)`;
+  if (r.height > r.width !== (aspectRatio === '9:16')) return `the film came out ${r.width}×${r.height}, not ${aspectRatio}`;
+  return null;
+}
+
+async function runMixer(env: Env, d: Db, job: Job, p: Project, edit: Edit): Promise<void> {
+  if (!env.RENDER_SERVICE_URL || !env.RENDER_SECRET) throw new Error('The mixing server is not set up yet, so trims and sound mixing are unavailable.');
+  const outputKey = mediaKey(p.user_id, p.id, 'final', p.id, 'mp4');
+  const thumbKey = mediaKey(p.user_id, p.id, 'final', `${p.id}-thumb`, 'jpg');
+  let res: Response;
+  try {
+    res = await fetch(`${env.RENDER_SERVICE_URL.replace(/\/$/, '')}/render`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.RENDER_SECRET}`, 'content-type': 'application/json' },
+      body: JSON.stringify(renderJobBody(edit, p.aspect_ratio, outputKey, thumbKey)),
+      signal: AbortSignal.timeout(MIXER_TIMEOUT_MS),
+    });
+  } catch (e) {
+    if (e instanceof Error && e.name === 'TimeoutError') throw new Error('The final cut took too long. Your credits were returned — try a shorter cut.');
+    throw new ProviderBusyError('the mixing server did not respond');
+  }
+  if ([429, 502, 503, 504].includes(res.status)) throw new ProviderBusyError(`the mixing server is busy (${res.status})`);
+  const body = (await res.json().catch(() => ({}))) as Partial<MixerResult> & { message?: string };
+  if (!res.ok) throw new Error(`The final cut failed: ${body.message ?? res.status}. Your credits were returned.`);
+  const r = body as MixerResult;
+  const problem = checkMixerResult(r, publicUrl(env, outputKey), editLength(edit), p.aspect_ratio);
+  if (problem) throw new Error(`The result was unusable: ${problem}. Your credits were returned — please try again.`);
+  const thumb = r.thumbnailUrl === publicUrl(env, thumbKey) ? r.thumbnailUrl : null;
+  await markTarget(d, job, 'done', undefined, { final_video_url: r.url, thumbnail_url: thumb, error: null });
+  await succeedJob(d, job.id, { url: r.url, thumbnail: thumb, seconds: r.seconds });
 }
 
 // ---------------------------------------------------------------- webhook results
@@ -379,9 +437,21 @@ async function finalizeJob(env: Env, d: Db, msg: Extract<JobMessage, { type: 'fi
     const url = await keepChecked(env, out.url, mediaKey(p.user_id, p.id, 'music', p.id, 'wav'), 'audio/wav', { kind: 'music' });
     await markTarget(d, job, 'done', undefined, { music_url: url });
     await succeedJob(d, job.id, { url });
+  } else if (job.kind === 'sfx' || job.kind === 'voice') {
+    const got = await download(out.url, 30 * 1024 * 1024);
+    if ('tooBig' in got) throw new Error('The sound came back too large.');
+    const type = got.contentType || 'audio/mpeg';
+    const problem = checkMedia(got.bytes, type, { kind: 'sound' });
+    if (problem) throw new Error(`The result was unusable: ${problem}. Your credits were returned — please try again.`);
+    const ext = type.includes('wav') ? 'wav' : type.includes('mp4') || type.includes('m4a') ? 'm4a' : 'mp3';
+    const requested = job.kind === 'sfx' ? Number(job.input.seconds) : null;
+    const measured = audioSeconds(got.bytes, ext);
+    const seconds = measured ?? requested ?? Math.max(1, String(job.input.text ?? '').length / 14);
+    const url = await putBytes(env, mediaKey(p.user_id, p.id, job.kind, job.target_id!, ext), got.bytes, ext === 'mp3' ? 'audio/mpeg' : type);
+    await markTarget(d, job, 'done', undefined, { url, duration_sec: Math.round(seconds * 100) / 100, error: null });
+    await succeedJob(d, job.id, { url });
   } else if (job.kind === 'render') {
-    const shots = ((await d.from('shots').select('duration_sec').eq('project_id', p.id)).data ?? []) as { duration_sec: number }[];
-    const seconds = shots.reduce((n, x) => n + x.duration_sec, 0);
+    const seconds = Number(job.input.seconds) || 0;
     const url = await keepChecked(env, out.url, mediaKey(p.user_id, p.id, 'final', p.id, 'mp4'), 'video/mp4', {
       kind: 'render',
       seconds,

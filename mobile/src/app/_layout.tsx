@@ -32,6 +32,7 @@ function Navigator() {
         <Stack.Screen name="new" options={{ title: 'New film', presentation: 'modal' }} />
         <Stack.Screen name="project/[id]" options={{ title: '' }} />
         <Stack.Screen name="shot/[id]" options={{ title: 'Shot' }} />
+        <Stack.Screen name="edit/[id]" options={{ title: 'Edit & mix' }} />
         <Stack.Screen name="wallet" options={{ title: 'Credits' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
         <Stack.Screen name="orders" options={{ title: 'Shop-ad orders' }} />

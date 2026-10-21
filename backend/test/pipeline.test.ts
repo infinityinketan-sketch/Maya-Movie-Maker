@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { normalizePlan, planPrompt, type FilmPlan } from '../src/providers/anthropic';
 import { resultUrl, verifyFalWebhook } from '../src/providers/fal';
-import { renderTracks, videoPrompt } from '../src/worker';
+import { videoPrompt } from '../src/worker';
+import { defaultEdit, falTracks } from '../src/edit';
 
 describe('plan normalisation', () => {
   it('snaps durations, trims fields and drops empty shots', () => {
@@ -46,16 +47,8 @@ describe('video + render', () => {
   });
 
   it('lays shots back to back and loops music to the film length', () => {
-    const { tracks, totalMs } = renderTracks(
-      [
-        { video_url: 'a.mp4', duration_sec: 8 },
-        { video_url: 'b.mp4', duration_sec: 6 },
-        { video_url: 'c.mp4', duration_sec: 8 },
-        { video_url: 'd.mp4', duration_sec: 8 },
-        { video_url: 'e.mp4', duration_sec: 8 },
-      ],
-      'm.wav',
-    );
+    const shots = [8, 6, 8, 8, 8].map((sec, idx) => ({ id: `s${idx}`, idx, video_url: `${'abcde'[idx]}.mp4`, duration_sec: sec }));
+    const { tracks, totalMs } = falTracks(defaultEdit(shots, 'm.wav'));
     expect(totalMs).toBe(38000);
     expect(tracks[0].keyframes.map((k) => k.timestamp)).toEqual([0, 8000, 14000, 22000, 30000]);
     expect(tracks[1].keyframes).toEqual([
@@ -65,7 +58,7 @@ describe('video + render', () => {
   });
 
   it('renders without music when none was made', () => {
-    expect(renderTracks([{ video_url: 'a.mp4', duration_sec: 4 }], null).tracks).toHaveLength(1);
+    expect(falTracks(defaultEdit([{ id: 's', idx: 0, video_url: 'a.mp4', duration_sec: 4 }], null)).tracks).toHaveLength(1);
   });
 
   it('extracts media URLs from fal results', () => {
