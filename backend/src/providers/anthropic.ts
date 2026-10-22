@@ -10,6 +10,7 @@ export interface PlannedShot {
   dialogue?: string;
   speaker?: string;
   characters?: string[];
+  same_setup_as_previous?: boolean;
 }
 export interface FilmPlan {
   title: string;
@@ -77,6 +78,11 @@ const PLAN_TOOL = {
                   dialogue: { type: 'string', description: 'Spoken line in the film language, short enough to say in the shot duration (about 2.5 words per second). Omit if silent.' },
                   speaker: { type: 'string', description: 'Character name speaking the dialogue' },
                   characters: { type: 'array', items: { type: 'string' }, description: 'Names of characters visible in the shot' },
+                  same_setup_as_previous: {
+                    type: 'boolean',
+                    description:
+                      'true when this shot continues the previous shot in the same scene: same place, framing, people and speaker; only the spoken line changes. Its camera and action are then copied word for word from the previous shot.',
+                  },
                 },
               },
             },
@@ -120,6 +126,8 @@ Dialogue rules for AI video (the model often gives a line to the wrong face or t
 - One speaker and one short line per shot, about 2.5 words per second at most.
 - Avoid words in the line that name another character who could be pictured instead (e.g. "Father, ..."); let the next shot show who is addressed.
 - Give every character a clearly different voice (age, pitch, tone), e.g. "deep, slow, aged male voice" vs "light, soft, youthful male voice".
+- When the same person keeps talking in the same place, mark the next shot same_setup_as_previous and keep its framing identical; only the line changes. Rewording a continuing shot makes the model invent a different shot, sometimes with a different voice.
+- Describe only what you want to see and hear. Never write what to avoid ("not deep", "no beard", "not old"): video models tend to produce what is named, even after "not".
 - Never let a face disappear and come back within one shot (bowing and rising, turning away and back, walking behind something): end the shot while the face is hidden and start the next with it visible. The model invents a new face otherwise.`;
 
 export async function callClaudeTool<T>(
@@ -166,6 +174,18 @@ export async function planFilm(env: Env, input: PlanInput): Promise<{ plan: Film
   return { plan: normalizePlan(raw), costUsd };
 }
 
+/**
+ * Learned in testing: when a shot continues the previous one (same person, same place), any change in wording,
+ * even a different camera line, makes the video model treat it as a new shot, and it can come back with a
+ * different person's voice. So a continuing shot reuses the previous shot's camera, action and cast word for
+ * word; only its line changes. A different speaker is not a continuation.
+ */
+export function continueSetup(sh: PlannedShot, prev: PlannedShot | undefined): PlannedShot {
+  if (!sh.same_setup_as_previous) return sh;
+  if (!prev || (sh.speaker ?? '').toLowerCase() !== (prev.speaker ?? '').toLowerCase()) return { ...sh, same_setup_as_previous: undefined };
+  return { ...sh, camera: prev.camera, action: prev.action, characters: prev.characters ? [...prev.characters] : [] };
+}
+
 /** Defensive clean-up so a slightly-off answer still produces valid rows. */
 export function normalizePlan(raw: FilmPlan): FilmPlan {
   const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -187,7 +207,9 @@ export function normalizePlan(raw: FilmPlan): FilmPlan {
           dialogue: str(sh.dialogue, 400) || undefined,
           speaker: str(sh.speaker, 60) || undefined,
           characters: Array.isArray(sh.characters) ? sh.characters.map((n) => str(n, 60)).filter(Boolean) : [],
-        })),
+          same_setup_as_previous: sh.same_setup_as_previous === true || undefined,
+        }))
+        .map((sh, i, all) => continueSetup(sh, all[i - 1])),
     }))
     .filter((s) => s.shots.length > 0)
     .slice(0, 30);

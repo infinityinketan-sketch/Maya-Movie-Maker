@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { normalizePlan, planPrompt, type FilmPlan } from '../src/providers/anthropic';
+import { continueSetup, normalizePlan, planPrompt, type FilmPlan } from '../src/providers/anthropic';
 import { resultUrl, verifyFalWebhook } from '../src/providers/fal';
 import { shotCast, videoPrompt } from '../src/worker';
 import { defaultEdit, falTracks } from '../src/edit';
@@ -47,21 +47,20 @@ describe('video + render', () => {
     expect(p.startsWith('Asha (young woman in a yellow saree, long braid) says in Hindi: "Chalo!"')).toBe(true);
     expect(p).toContain('The voice is light, soft, youthful female voice.');
     expect(p).toContain('lips move clearly in sync');
-    expect(p).toContain('Asha is the only voice heard; no one is speaking off camera.');
+    expect(p).toContain('Asha is the only voice heard.');
     expect(p).toContain('No background music');
   });
 
-  it("names the film's other voices as voices not to use, even when they are not in the shot", () => {
+  it('describes only the wanted voice, never the voices to avoid', () => {
     const p = videoPrompt({ language: 'Hindi', style: null }, { camera: 'close-up', action: 'Asha looks away', dialogue: 'Nahi.', speaker: 'Asha' }, [asha], [asha, ravi]);
-    expect(p).toContain('Do not use these other voices from the film: deep, slow, aged male voice.');
-    expect(p).not.toContain('Ravi (older man');
+    expect(p).not.toContain('deep, slow, aged male voice');
+    expect(p).not.toMatch(/do not use|not deep|not old/i);
   });
 
   it('keeps any other character in the shot silent', () => {
     const p = videoPrompt({ language: 'Hindi', style: null }, { camera: 'two-shot', action: 'They sit on the veranda', dialogue: 'Suno.', speaker: 'Ravi' }, [asha, ravi], [asha, ravi]);
     expect(p.startsWith('Ravi (older man with a grey moustache, white kurta) says in Hindi: "Suno."')).toBe(true);
     expect(p).toContain('Asha (young woman in a yellow saree, long braid) stays silent and does not speak.');
-    expect(p).toContain('Do not use these other voices from the film: light, soft, youthful female voice.');
   });
 
   it('tells the model no one speaks in a silent shot', () => {
@@ -80,6 +79,34 @@ describe('video + render', () => {
     expect(shotCast({ characters: ['Asha', 'Ravi'], dialogue: 'Suno.', speaker: 'Ravi' })).toEqual(['ravi']);
     expect(shotCast({ characters: ['Asha', 'Ravi'], dialogue: null, speaker: null })).toEqual(['asha', 'ravi']);
     expect(shotCast({ characters: ['Asha'], dialogue: null, speaker: 'Asha' })).toEqual(['asha']);
+  });
+
+  it('copies camera, action and cast word for word into a continuing shot; only the line changes', () => {
+    const prev = { duration_sec: 8, camera: 'medium close-up, slightly high angle', action: 'Karunya sits on the veranda and speaks', dialogue: 'Line one.', speaker: 'Karunya', characters: ['Karunya'] };
+    const next = { duration_sec: 8, camera: 'slow push-in', action: 'Karunya gazes into the distance', dialogue: 'Line two.', speaker: 'Karunya', characters: ['Karunya'], same_setup_as_previous: true };
+    const out = continueSetup(next, prev);
+    expect(out.camera).toBe(prev.camera);
+    expect(out.action).toBe(prev.action);
+    expect(out.dialogue).toBe('Line two.');
+  });
+
+  it('does not treat a shot with a different speaker, or a first shot, as a continuation', () => {
+    const prev = { duration_sec: 8, camera: 'mcu', action: 'Ravi speaks', dialogue: 'A.', speaker: 'Ravi', characters: ['Ravi'] };
+    const other = { duration_sec: 8, camera: 'cu', action: 'Asha answers', dialogue: 'B.', speaker: 'Asha', characters: ['Asha'], same_setup_as_previous: true };
+    expect(continueSetup(other, prev)).toMatchObject({ camera: 'cu', action: 'Asha answers', same_setup_as_previous: undefined });
+    expect(continueSetup(other, undefined).action).toBe('Asha answers');
+  });
+
+  it('applies continuations when normalising a plan', () => {
+    const plan = normalizePlan({
+      title: 'T', logline: 'L', synopsis: 'S', music_prompt: 'M',
+      characters: [{ name: 'Karunya', description: 'young man' }],
+      scenes: [{ heading: 'EXT. VERANDA - DAY', summary: 's', shots: [
+        { duration_sec: 8, camera: 'mcu high angle', action: 'Karunya speaks', dialogue: 'One.', speaker: 'Karunya', characters: ['Karunya'] },
+        { duration_sec: 8, camera: 'push-in', action: 'something else', dialogue: 'Two.', speaker: 'Karunya', characters: ['Karunya'], same_setup_as_previous: true },
+      ] }],
+    });
+    expect(plan.scenes[0].shots[1]).toMatchObject({ camera: 'mcu high angle', action: 'Karunya speaks', dialogue: 'Two.' });
   });
 
   it('lays shots back to back and loops music to the film length', () => {

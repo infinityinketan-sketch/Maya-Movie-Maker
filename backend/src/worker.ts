@@ -305,9 +305,9 @@ export interface CastMember {
  * Lessons from real shoots, applied to every video prompt:
  * - Video models don't know character names, so each person is identified by how they look.
  * - The spoken line comes FIRST, with an exact voice (age and tone) and lips in sync; models weight the start of a prompt most.
- * - The voices of the film's other characters are named as voices NOT to use; otherwise a father's deep voice
- *   can come out of his son's mouth even when the father isn't in the shot.
- * - Everyone else in the shot is told to stay silent, and nobody is speaking off camera.
+ * - Only the wanted voice is described. Naming unwanted voices ("not deep", "don't use the father's voice")
+ *   backfired in testing: video models tend to produce what is named.
+ * - Everyone else in the shot is told to stay silent.
  * - Silent shots say no one speaks, otherwise the model invents speech.
  */
 export function videoPrompt(
@@ -324,11 +324,9 @@ export function videoPrompt(
     const speaker = sp ? who(sp) : shot.speaker || 'the character';
     parts.push(`${speaker} says in ${p.language}: "${shot.dialogue}"`);
     if (sp?.voice) parts.push(`The voice is ${sp.voice}.`);
-    const avoid = [...new Set(filmCast.filter((c) => !sp || !same(c, sp)).map((c) => c.voice?.trim()).filter((v): v is string => !!v && v !== sp?.voice))];
-    if (avoid.length) parts.push(`Do not use these other voices from the film: ${avoid.join('; ')}.`);
     parts.push('The lips move clearly in sync with every word.');
     for (const c of cast.filter((c) => !sp || !same(c, sp))) parts.push(`${who(c)} stays silent and does not speak.`);
-    parts.push(`${sp ? sp.name : 'The speaker'} is the only voice heard; no one is speaking off camera.`);
+    parts.push(`${sp ? sp.name : 'The speaker'} is the only voice heard.`);
   } else {
     parts.push('No one on screen speaks; no dialogue or voices.');
   }

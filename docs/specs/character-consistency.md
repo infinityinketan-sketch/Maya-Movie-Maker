@@ -89,10 +89,12 @@ Rules now built in (`DIRECTOR_RULES`, `videoPrompt`, `shotCast`, Director's revi
 1. **A talking shot shows only its speaker,** facing the camera with the mouth visible. Listeners get their own silent reaction shot. The planner enforces this: a shot with a line keeps only the speaker in its cast.
 2. **No speaking "to someone off camera".** The speaker faces the camera or looks into the distance.
 3. **The line goes first in the video prompt,** with the speaker identified by appearance, their exact voice (age, pitch, tone), and lips in sync.
-4. **The film's other voices are named as voices not to use,** even when those characters aren't in the shot.
+4. **Describe only the wanted voice.** An earlier version named the film's other voices as voices "not to use", and prompts said "not deep, not old". In testing that backfired: the unwanted deep voice came out anyway, because video models tend to produce what is named, even after "not". Removed.
 5. **Everyone else in the shot is told to stay silent,** and silent shots say no one speaks.
 6. **Every character gets a clearly different voice** in the story plan.
 7. **The line avoids naming another character who could be pictured instead** ("Father, …").
+8. **A continuing shot copies the previous shot's prompt word for word; only the line changes.** Found by Ketan in testing: Episode 2 clips 7 and 8 are the same shot of Karunya. Clip 8 written with a different camera and wording came back in the father's voice three times; clip 7's exact prompt with only clip 8's line worked first time. The planner now marks such shots `same_setup_as_previous` and `continueSetup` copies the camera, action and cast. A different speaker is never a continuation.
+9. **Next:** a continuing shot should also reuse the previous shot's approved storyboard frame (saves 14 credits) or start from the previous clip's last frame. Not built yet.
 
 Known limit: these rules make the right voice much more likely but cannot guarantee it, and the built-in speech does not keep one voice per character across shots. The guaranteed fix, if retakes stay costly: generate video without speech, make each line with a fixed text-to-speech voice per character (each character already has a `voice` field), and lip-sync it on fal.ai. Not built yet; decide after measuring the retake rate.
 
